@@ -1,0 +1,442 @@
+'use client'
+
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import {
+  Mail, MessageSquare, Video, Phone, FileText,
+  Plus, ExternalLink, Heart, Building2, Tag,
+  CheckCircle2, Circle, Pencil, ArrowLeft,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Separator } from '@/components/ui/separator'
+import {
+  cn, STATUS_STYLES, STATUS_LABELS, PRIORITY_STYLES,
+  HEALTH_COLORS, formatDateTime, dueDateLabel,
+} from '@/lib/utils'
+import type { CustomerWithIdentifiers, Interaction, FollowUp, Ticket } from '@/lib/database.types'
+import { AddInteractionDialog } from '@/components/add-interaction-dialog'
+import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
+import { TicketBuilderDialog } from '@/components/ticket-builder-dialog'
+import { EditCustomerDialog } from '@/components/edit-customer-dialog'
+import { BubblesVideoModal } from '@/components/bubbles-video-modal'
+import { supabase } from '@/lib/supabase'
+import { toast } from 'sonner'
+import Link from 'next/link'
+
+interface Props {
+  customer: CustomerWithIdentifiers
+  interactions: Interaction[]
+  followUps: FollowUp[]
+  tickets: Ticket[]
+}
+
+const CHANNEL_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
+  email:    { icon: Mail,           color: '#3B82F6', bg: 'rgba(59,130,246,0.1)',  label: 'Email'    },
+  whatsapp: { icon: MessageSquare,  color: '#2DB975', bg: 'rgba(45,185,117,0.1)', label: 'WhatsApp' },
+  meeting:  { icon: Video,          color: '#8B5CF6', bg: 'rgba(139,92,246,0.1)', label: 'Reunião'  },
+  call:     { icon: Phone,          color: '#F97316', bg: 'rgba(249,115,22,0.1)', label: 'Chamada'  },
+  note:     { icon: FileText,       color: '#9CA3AF', bg: 'rgba(156,163,175,0.1)',label: 'Nota'     },
+}
+
+export function CustomerDetailClient({ customer, interactions, followUps, tickets }: Props) {
+  const router = useRouter()
+  const [showAddInteraction, setShowAddInteraction] = useState(false)
+  const [showAddFollowUp,    setShowAddFollowUp]    = useState(false)
+  const [showTicketBuilder,  setShowTicketBuilder]  = useState(false)
+  const [showEditCustomer,   setShowEditCustomer]   = useState(false)
+  const [bubblesUrl,         setBubblesUrl]         = useState<string | null>(null)
+
+  const openFollowUps = followUps.filter((f) => f.status === 'open')
+  const doneFollowUps = followUps.filter((f) => f.status === 'done')
+  const statusStyle   = STATUS_STYLES[customer.status]
+  const refresh       = () => router.refresh()
+
+  async function toggleFollowUp(id: string, current: string) {
+    const next = current === 'done' ? 'open' : 'done'
+    const { error } = await supabase
+      .from('follow_ups')
+      .update({ status: next, completed_at: next === 'done' ? new Date().toISOString() : null })
+      .eq('id', id)
+    if (error) { toast.error('Erro ao atualizar.'); return }
+    toast.success(next === 'done' ? 'Concluído!' : 'Reaberto.')
+    refresh()
+  }
+
+  return (
+    <div className="p-7 max-w-[1000px] mx-auto space-y-6 animate-fade-in">
+
+      {/* Back */}
+      <Link
+        href="/customers"
+        className="inline-flex items-center gap-1.5 text-xs font-medium transition-colors hover:opacity-70"
+        style={{ color: 'var(--muted-foreground)' }}
+      >
+        <ArrowLeft className="h-3 w-3" /> Clientes
+      </Link>
+
+      {/* Header card */}
+      <div
+        className="rounded-xl p-6"
+        style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          {/* Identity */}
+          <div className="space-y-2 flex-1 min-w-0">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-xl font-semibold" style={{ color: 'var(--foreground)' }}>
+                {customer.name}
+              </h1>
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11.5px] font-medium"
+                style={{ background: statusStyle.bg, color: statusStyle.text }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusStyle.dot }} />
+                {STATUS_LABELS[customer.status]}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {customer.company && (
+                <span className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                  <Building2 className="h-3.5 w-3.5 shrink-0" /> {customer.company}
+                </span>
+              )}
+              {customer.plan && (
+                <span className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                  <Tag className="h-3.5 w-3.5 shrink-0" /> {customer.plan}
+                </span>
+              )}
+              <span className={cn('flex items-center gap-1.5 text-sm font-medium', HEALTH_COLORS[customer.health_score])}>
+                <Heart className="h-3.5 w-3.5 fill-current" /> {customer.health_score}/5
+              </span>
+            </div>
+
+            {/* Identifiers */}
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {customer.customer_identifiers.map((i) => (
+                <span
+                  key={i.id}
+                  className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-mono"
+                  style={{
+                    background: i.is_primary ? 'rgba(91,91,214,0.08)' : 'var(--muted)',
+                    color: i.is_primary ? 'var(--primary)' : 'var(--muted-foreground)',
+                    border: `1px solid ${i.is_primary ? 'rgba(91,91,214,0.2)' : 'var(--border)'}`,
+                  }}
+                >
+                  {i.type === 'email' && <Mail className="h-3 w-3" />}
+                  {(i.type === 'phone' || i.type === 'whatsapp') && <MessageSquare className="h-3 w-3" />}
+                  {i.value}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 flex-wrap justify-end shrink-0">
+            <ActionBtn icon={Pencil} label="Editar" onClick={() => setShowEditCustomer(true)} />
+            <ActionBtn icon={Plus}   label="Follow-up" onClick={() => setShowAddFollowUp(true)} />
+            <ActionBtn icon={Plus}   label="Interação" onClick={() => setShowAddInteraction(true)} />
+            <Button
+              size="sm"
+              onClick={() => setShowTicketBuilder(true)}
+              className="h-8 gap-1.5 rounded-lg text-[12.5px] font-medium"
+              style={{ background: 'var(--primary)', color: '#fff' }}
+            >
+              <Plus className="h-3.5 w-3.5" /> Ticket
+            </Button>
+          </div>
+        </div>
+
+        {customer.notes && (
+          <div
+            className="mt-4 p-3 rounded-lg text-sm"
+            style={{
+              background: 'var(--muted)',
+              color: 'var(--muted-foreground)',
+              borderLeft: '3px solid var(--border)',
+            }}
+          >
+            {customer.notes}
+          </div>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <Tabs defaultValue="timeline">
+        <TabsList
+          className="rounded-lg p-1 h-auto gap-0.5"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+        >
+          <TabsTrigger value="timeline" className="rounded-md text-[13px] px-4 py-1.5">
+            Timeline ({interactions.length})
+          </TabsTrigger>
+          <TabsTrigger value="followups" className="rounded-md text-[13px] px-4 py-1.5">
+            Follow-ups ({openFollowUps.length})
+          </TabsTrigger>
+          <TabsTrigger value="tickets" className="rounded-md text-[13px] px-4 py-1.5">
+            Tickets ({tickets.length})
+          </TabsTrigger>
+        </TabsList>
+
+        {/* TIMELINE */}
+        <TabsContent value="timeline" className="mt-5 space-y-3">
+          {interactions.length === 0 && (
+            <EmptyState message="Sem interações registadas. Adiciona a primeira." />
+          )}
+          {interactions.map((i) => {
+            const ch = CHANNEL_CONFIG[i.type] ?? CHANNEL_CONFIG.note
+            const Icon = ch.icon
+            return (
+              <div key={i.id} className="flex gap-3.5 animate-fade-in">
+                {/* Icon bubble */}
+                <div className="flex flex-col items-center">
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ background: ch.bg }}
+                  >
+                    <Icon className="h-4 w-4" style={{ color: ch.color }} />
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div
+                  className="flex-1 rounded-xl p-4 space-y-2"
+                  style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="text-[11px] font-semibold uppercase tracking-wide"
+                          style={{ color: ch.color }}
+                        >
+                          {ch.label}
+                        </span>
+                        {i.direction && (
+                          <span
+                            className="text-[10px] rounded-full px-1.5 py-0.5"
+                            style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                          >
+                            {i.direction === 'inbound' ? '↓ recebido' : '↑ enviado'}
+                          </span>
+                        )}
+                      </div>
+                      {i.subject && (
+                        <p className="font-medium text-[14px]" style={{ color: 'var(--foreground)' }}>
+                          {i.subject}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-[11px] shrink-0" style={{ color: 'var(--muted-foreground)' }}>
+                      {formatDateTime(i.occurred_at)}
+                    </span>
+                  </div>
+
+                  {i.content && (
+                    <p
+                      className="text-sm leading-relaxed whitespace-pre-wrap"
+                      style={{ color: 'var(--muted-foreground)' }}
+                    >
+                      {i.content}
+                    </p>
+                  )}
+
+                  {/* Bubbles embed */}
+                  {i.bubbles_url && (
+                    <div
+                      className="flex items-center gap-3 rounded-lg px-3 py-2.5 mt-1"
+                      style={{
+                        background: 'rgba(139,92,246,0.08)',
+                        border: '1px solid rgba(139,92,246,0.2)',
+                      }}
+                    >
+                      <Video className="h-4 w-4 shrink-0" style={{ color: '#8B5CF6' }} />
+                      <span className="text-sm font-medium flex-1 truncate" style={{ color: '#6D28D9' }}>
+                        {i.bubbles_title ?? 'Gravação Bubbles'}
+                      </span>
+                      <div className="flex gap-1.5 shrink-0">
+                        <button
+                          onClick={() => setBubblesUrl(i.bubbles_url!)}
+                          className="text-xs font-medium px-2.5 py-1 rounded-md transition-colors"
+                          style={{
+                            background: 'rgba(139,92,246,0.15)',
+                            color: '#7C3AED',
+                          }}
+                        >
+                          Ver vídeo
+                        </button>
+                        <a href={i.bubbles_url} target="_blank" rel="noopener noreferrer">
+                          <button
+                            className="p-1 rounded-md transition-colors hover:opacity-70"
+                            style={{ color: '#8B5CF6' }}
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </button>
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </TabsContent>
+
+        {/* FOLLOW-UPS */}
+        <TabsContent value="followups" className="mt-5 space-y-2">
+          {openFollowUps.length === 0 && doneFollowUps.length === 0 && (
+            <EmptyState message="Sem follow-ups. Cria o primeiro." />
+          )}
+          {openFollowUps.map((f) => (
+            <FollowUpRow key={f.id} f={f} onToggle={toggleFollowUp} />
+          ))}
+          {doneFollowUps.length > 0 && (
+            <>
+              <Separator className="my-3" style={{ background: 'var(--border)' }} />
+              <p className="text-[11px] font-semibold uppercase tracking-wide px-1 pb-1" style={{ color: 'var(--muted-foreground)' }}>
+                Concluídos
+              </p>
+              {doneFollowUps.map((f) => (
+                <FollowUpRow key={f.id} f={f} onToggle={toggleFollowUp} />
+              ))}
+            </>
+          )}
+        </TabsContent>
+
+        {/* TICKETS */}
+        <TabsContent value="tickets" className="mt-5 space-y-3">
+          {tickets.length === 0 && <EmptyState message="Sem tickets." />}
+          {tickets.map((t) => {
+            const ps = PRIORITY_STYLES[t.priority]
+            return (
+              <div
+                key={t.id}
+                className="rounded-xl p-4 space-y-2"
+                style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-medium text-sm" style={{ color: 'var(--foreground)' }}>
+                    {t.title}
+                  </p>
+                  <div className="flex gap-1.5 shrink-0">
+                    <span
+                      className="text-[11px] font-medium rounded-full px-2 py-0.5"
+                      style={{ background: ps.bg, color: ps.text }}
+                    >
+                      {t.priority}
+                    </span>
+                    <span
+                      className="text-[11px] font-medium rounded-full px-2 py-0.5"
+                      style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                    >
+                      {t.status}
+                    </span>
+                  </div>
+                </div>
+                {t.description && (
+                  <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>{t.description}</p>
+                )}
+                {t.tags.length > 0 && (
+                  <div className="flex gap-1 flex-wrap">
+                    {t.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-md px-2 py-0.5 text-[11px]"
+                        style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </TabsContent>
+      </Tabs>
+
+      {/* Modals */}
+      <AddInteractionDialog open={showAddInteraction} customerId={customer.id} onClose={() => { setShowAddInteraction(false); refresh() }} />
+      <AddFollowUpDialog    open={showAddFollowUp}    customerId={customer.id} onClose={() => { setShowAddFollowUp(false);    refresh() }} />
+      <TicketBuilderDialog  open={showTicketBuilder}  customer={customer}      onClose={() => { setShowTicketBuilder(false);  refresh() }} />
+      <EditCustomerDialog   open={showEditCustomer}   customer={customer}      onClose={() => { setShowEditCustomer(false);   refresh() }} />
+      <BubblesVideoModal    url={bubblesUrl}                                   onClose={() => setBubblesUrl(null)} />
+    </div>
+  )
+}
+
+function FollowUpRow({ f, onToggle }: { f: FollowUp; onToggle: (id: string, s: string) => void }) {
+  const { label, color } = dueDateLabel(f.due_date)
+  const done = f.status === 'done'
+  const ps   = PRIORITY_STYLES[f.priority]
+  return (
+    <div
+      className="flex items-start gap-3 rounded-xl p-4 transition-opacity"
+      style={{
+        background: 'var(--card)',
+        boxShadow: 'var(--shadow-card)',
+        opacity: done ? 0.5 : 1,
+      }}
+    >
+      <button onClick={() => onToggle(f.id, f.status)} className="mt-0.5 shrink-0">
+        {done
+          ? <CheckCircle2 className="h-[18px] w-[18px]" style={{ color: '#2DB975' }} />
+          : <Circle       className="h-[18px] w-[18px] transition-colors hover:text-emerald-400" style={{ color: 'var(--border)' }} />}
+      </button>
+      <div className="flex-1 min-w-0">
+        <p
+          className={cn('text-sm font-medium', done && 'line-through')}
+          style={{ color: done ? 'var(--muted-foreground)' : 'var(--foreground)' }}
+        >
+          {f.title}
+        </p>
+        {f.description && (
+          <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted-foreground)' }}>
+            {f.description}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-col items-end gap-1 shrink-0">
+        <span
+          className="text-[11px] font-medium rounded-full px-2 py-0.5"
+          style={{ background: ps.bg, color: ps.text }}
+        >
+          {f.priority}
+        </span>
+        <span className="text-[11px]" style={{ color }}>
+          {label}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function ActionBtn({ icon: Icon, label, onClick }: { icon: React.ElementType; label: string; onClick: () => void }) {
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={onClick}
+      className="h-8 gap-1.5 rounded-lg text-[12.5px] font-medium"
+      style={{
+        background: 'var(--card)',
+        border: '1px solid var(--border)',
+        color: 'var(--foreground)',
+      }}
+    >
+      <Icon className="h-3.5 w-3.5" /> {label}
+    </Button>
+  )
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div
+      className="rounded-xl p-8 text-center"
+      style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+    >
+      <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>{message}</p>
+    </div>
+  )
+}
