@@ -1,7 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { AlertTriangle, Clock, Users, Ticket, Mail, MessageSquare, Video, Phone, FileText, ArrowRight } from 'lucide-react'
+import {
+  AlertTriangle, Clock, Users, Ticket,
+  Mail, MessageSquare, Video, Phone, FileText, ArrowUpRight,
+} from 'lucide-react'
 import { dueDateLabel, STATUS_STYLES, STATUS_LABELS, PRIORITY_STYLES, timeAgo } from '@/lib/utils'
 import type { FollowUp, Interaction, Customer } from '@/lib/database.types'
 
@@ -28,11 +31,28 @@ function statusCount(customers: Pick<Customer, 'id' | 'status'>[], status: strin
 }
 
 const KPI_CONFIG = [
-  { key: 'overdue',  label: 'Atrasados',       icon: AlertTriangle, color: '#E5484D', bg: 'rgba(229,72,77,0.08)',   href: '/follow-ups?filter=overdue' },
-  { key: 'today',    label: 'Para hoje',         icon: Clock,         color: '#F59E0B', bg: 'rgba(245,158,11,0.08)',  href: '/follow-ups?filter=today'   },
-  { key: 'active',   label: 'Clientes ativos',   icon: Users,         color: '#2DB975', bg: 'rgba(45,185,117,0.08)', href: '/customers?status=active'   },
-  { key: 'tickets',  label: 'Tickets abertos',   icon: Ticket,        color: '#5B5BD6', bg: 'rgba(91,91,214,0.08)',  href: '/tickets'                   },
+  { key: 'overdue', label: 'Atrasados',     icon: AlertTriangle, color: '#E5484D', bg: 'rgba(229,72,77,0.10)',   borderColor: '#E5484D', href: '/follow-ups?filter=overdue' },
+  { key: 'today',   label: 'Para hoje',      icon: Clock,         color: '#F59E0B', bg: 'rgba(245,158,11,0.10)',  borderColor: '#F59E0B', href: '/follow-ups?filter=today'   },
+  { key: 'active',  label: 'Clientes ativos',icon: Users,         color: '#2DB975', bg: 'rgba(45,185,117,0.10)', borderColor: '#2DB975', href: '/customers?status=active'   },
+  { key: 'tickets', label: 'Tickets abertos',icon: Ticket,        color: '#5B5BD6', bg: 'rgba(91,91,214,0.10)',  borderColor: '#5B5BD6', href: '/tickets'                   },
 ]
+
+// Left-border color by priority for follow-up rows
+const PRIORITY_BORDER: Record<string, string> = {
+  urgent: '#E5484D',
+  high:   '#F97316',
+  medium: '#3B82F6',
+  low:    '#A0AEC0',
+}
+
+// Section header label style (reused)
+const sectionLabel: React.CSSProperties = {
+  fontSize: '10px',
+  fontWeight: 700,
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  color: 'var(--muted-foreground)',
+}
 
 export function DashboardClient({ data }: { data: DashboardData }) {
   const { overdue, today, customers, openTickets, recent } = data
@@ -47,143 +67,338 @@ export function DashboardClient({ data }: { data: DashboardData }) {
   const allPending = [...overdue, ...today].slice(0, 7)
 
   return (
-    <div className="p-7 max-w-[1100px] mx-auto space-y-7 animate-fade-in">
+    <div
+      style={{
+        padding: '2rem 2.25rem',
+        maxWidth: 1140,
+        margin: '0 auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2rem',
+        animation: 'fadeIn 220ms ease forwards',
+        fontFamily: 'var(--font-outfit), Outfit, sans-serif',
+      }}
+    >
 
-      {/* Header */}
+      {/* ── Header ── */}
       <div>
-        <h1 className="text-[22px] font-semibold tracking-tight" style={{ color: 'var(--foreground)' }}>
+        <h1
+          style={{
+            fontSize: '1.375rem',
+            fontWeight: 700,
+            letterSpacing: '-0.02em',
+            color: 'var(--foreground)',
+            margin: 0,
+            lineHeight: 1.2,
+          }}
+        >
           Bom dia, Pedro 👋
         </h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+        <p
+          style={{
+            fontSize: '0.875rem',
+            color: 'var(--muted-foreground)',
+            margin: '0.35rem 0 0',
+          }}
+        >
           Aqui está um resumo do teu dia.
         </p>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {KPI_CONFIG.map(({ key, label, icon: Icon, color, bg, href }, i) => (
+      {/* ── KPI Cards ── */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '1rem',
+        }}
+      >
+        {KPI_CONFIG.map(({ key, label, icon: Icon, color, bg, borderColor, href }, i) => (
           <Link
             key={key}
             href={href}
-            className={`card-hover group rounded-xl p-5 stagger-${i + 1} animate-fade-in`}
+            className={`card-hover stagger-${i + 1} animate-fade-in`}
             style={{
+              display: 'block',
               background: 'var(--card)',
               boxShadow: 'var(--shadow-card)',
+              borderRadius: 14,
+              padding: '1.25rem 1.375rem 1.375rem',
+              textDecoration: 'none',
+              borderTop: `3px solid ${borderColor}`,
+              position: 'relative',
+              overflow: 'hidden',
             }}
           >
-            <div className="flex items-start justify-between">
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                style={{ background: bg }}
-              >
-                <Icon className="h-4 w-4" style={{ color }} strokeWidth={2} />
-              </div>
-              <ArrowRight
-                className="h-3.5 w-3.5 opacity-0 group-hover:opacity-40 transition-opacity"
-                style={{ color: 'var(--muted-foreground)' }}
-              />
+            {/* Icon bubble */}
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                background: bg,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '1rem',
+              }}
+            >
+              <Icon style={{ width: 17, height: 17, color, strokeWidth: 2.2 }} />
             </div>
-            <div className="mt-4">
-              <p
-                className="text-3xl font-semibold tabular leading-none"
-                style={{ color }}
-              >
-                {kpiValues[key]}
-              </p>
-              <p className="text-xs font-medium mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
-                {label}
-              </p>
-            </div>
+
+            {/* Number */}
+            <p
+              className="tabular"
+              style={{
+                fontSize: '2.5rem',
+                fontWeight: 700,
+                lineHeight: 1,
+                color,
+                margin: 0,
+                letterSpacing: '-0.03em',
+              }}
+            >
+              {kpiValues[key]}
+            </p>
+
+            {/* Label */}
+            <p
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                color: 'var(--muted-foreground)',
+                margin: '0.5rem 0 0',
+              }}
+            >
+              {label}
+            </p>
+
+            {/* Arrow hint top-right */}
+            <ArrowUpRight
+              style={{
+                position: 'absolute',
+                top: '1rem',
+                right: '1rem',
+                width: 15,
+                height: 15,
+                color: 'var(--muted-foreground)',
+                opacity: 0.35,
+              }}
+            />
           </Link>
         ))}
       </div>
 
-      {/* Status overview pills */}
-      <div className="flex flex-wrap gap-2">
-        {(['onboarding', 'at-risk', 'troubleshooting', 'churned'] as const).map((s) => {
-          const style = STATUS_STYLES[s]
-          const count = statusCount(customers, s)
-          return (
-            <Link
-              key={s}
-              href={`/customers?status=${s}`}
-              className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-medium transition-all hover:opacity-80"
-              style={{ background: style.bg, color: style.text }}
-            >
-              <span
-                className="status-dot"
-                style={{ background: style.dot }}
-              />
-              {STATUS_LABELS[s]} · {count}
-            </Link>
-          )
-        })}
+      {/* ── Status pills row ── */}
+      <div>
+        <p style={{ ...sectionLabel, marginBottom: '0.625rem' }}>Estado dos clientes</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+          {(['onboarding', 'at-risk', 'troubleshooting', 'churned'] as const).map((s) => {
+            const style = STATUS_STYLES[s]
+            const count = statusCount(customers, s)
+            return (
+              <Link
+                key={s}
+                href={`/customers?status=${s}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  borderRadius: 999,
+                  padding: '0.4375rem 0.875rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  background: style.bg,
+                  color: style.text,
+                  textDecoration: 'none',
+                  transition: 'opacity 150ms',
+                  border: `1px solid ${style.dot}30`,
+                }}
+              >
+                <span className="status-dot" style={{ background: style.dot }} />
+                {STATUS_LABELS[s]}
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: 22,
+                    height: 22,
+                    borderRadius: 999,
+                    background: style.dot,
+                    color: '#fff',
+                    fontSize: '0.6875rem',
+                    fontWeight: 700,
+                    lineHeight: 1,
+                  }}
+                >
+                  {count}
+                </span>
+              </Link>
+            )
+          })}
+        </div>
       </div>
 
-      {/* Main content: pending + activity */}
-      <div className="grid lg:grid-cols-5 gap-5">
+      {/* ── Main two-column grid ── */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '3fr 2fr',
+          gap: '1.25rem',
+          alignItems: 'start',
+        }}
+      >
 
-        {/* Follow-ups pending — wider column */}
+        {/* Follow-ups pending */}
         <div
-          className="lg:col-span-3 rounded-xl overflow-hidden"
-          style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+          style={{
+            background: 'var(--card)',
+            boxShadow: 'var(--shadow-card)',
+            borderRadius: 14,
+            overflow: 'hidden',
+          }}
         >
+          {/* Card header */}
           <div
-            className="flex items-center justify-between px-5 py-4"
-            style={{ borderBottom: '1px solid var(--border)' }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '1rem 1.25rem',
+              borderBottom: '1px solid var(--border)',
+            }}
           >
-            <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>
-              Follow-ups pendentes
-            </p>
+            <div>
+              <p style={sectionLabel}>Follow-ups</p>
+              <p
+                style={{
+                  fontSize: '0.9375rem',
+                  fontWeight: 700,
+                  color: 'var(--foreground)',
+                  margin: '0.15rem 0 0',
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                Pendentes
+              </p>
+            </div>
             <Link
               href="/follow-ups"
-              className="text-xs font-medium transition-colors hover:opacity-70"
-              style={{ color: 'var(--primary)' }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                color: 'var(--primary)',
+                textDecoration: 'none',
+                opacity: 0.9,
+              }}
             >
-              Ver todos →
+              Ver todos
+              <ArrowUpRight style={{ width: 13, height: 13 }} />
             </Link>
           </div>
 
           {allPending.length === 0 ? (
-            <div className="px-5 py-8 text-center">
-              <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                Sem follow-ups pendentes. 🎉
-              </p>
+            <div
+              style={{
+                padding: '3rem 1.25rem',
+                textAlign: 'center',
+                color: 'var(--muted-foreground)',
+                fontSize: '0.875rem',
+              }}
+            >
+              Sem follow-ups pendentes. 🎉
             </div>
           ) : (
-            <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-              {allPending.map((f) => {
+            <div>
+              {allPending.map((f, idx) => {
                 const { label, color } = dueDateLabel(f.due_date)
                 const isOverdue = overdue.some((o) => o.id === f.id)
                 const priorityStyle = PRIORITY_STYLES[f.priority]
+                const leftBorderColor = PRIORITY_BORDER[f.priority] ?? '#A0AEC0'
                 return (
                   <Link
                     key={f.id}
                     href={`/customers/${f.customer_id}`}
-                    className="flex items-center gap-4 px-5 py-3.5 hover:bg-[var(--muted)] transition-colors"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '1rem',
+                      padding: '0.875rem 1.25rem 0.875rem 1rem',
+                      borderBottom: idx < allPending.length - 1 ? '1px solid var(--border)' : 'none',
+                      borderLeft: `3px solid ${leftBorderColor}`,
+                      textDecoration: 'none',
+                      transition: 'background 120ms',
+                      background: 'transparent',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--muted)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p
+                        style={{
+                          fontSize: '0.875rem',
+                          fontWeight: 600,
+                          color: 'var(--foreground)',
+                          margin: 0,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
                         {f.title}
                       </p>
-                      <p className="text-xs truncate mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                        {f.customers?.name}{f.customers?.company ? ` · ${f.customers.company}` : ''}
+                      <p
+                        style={{
+                          fontSize: '0.75rem',
+                          color: 'var(--muted-foreground)',
+                          margin: '0.2rem 0 0',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          fontWeight: 500,
+                        }}
+                      >
+                        {f.customers?.name}
+                        {f.customers?.company
+                          ? <span style={{ opacity: 0.65 }}> · {f.customers.company}</span>
+                          : null}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span
-                        className="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                        style={{ background: priorityStyle.bg, color: priorityStyle.text }}
-                      >
-                        {f.priority}
-                      </span>
-                      <span
-                        className="text-[11px] font-medium"
-                        style={{ color: isOverdue ? 'var(--status-churned)' : color }}
-                      >
-                        {label}
-                      </span>
-                    </div>
+
+                    {/* Priority pill */}
+                    <span
+                      style={{
+                        borderRadius: 999,
+                        padding: '0.2rem 0.6rem',
+                        fontSize: '0.6875rem',
+                        fontWeight: 700,
+                        background: priorityStyle.bg,
+                        color: priorityStyle.text,
+                        whiteSpace: 'nowrap',
+                        textTransform: 'capitalize',
+                        letterSpacing: '0.02em',
+                      }}
+                    >
+                      {f.priority}
+                    </span>
+
+                    {/* Due date */}
+                    <span
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        color: isOverdue ? 'var(--status-churned)' : color,
+                        whiteSpace: 'nowrap',
+                        minWidth: 52,
+                        textAlign: 'right',
+                      }}
+                    >
+                      {label}
+                    </span>
                   </Link>
                 )
               })}
@@ -193,50 +408,125 @@ export function DashboardClient({ data }: { data: DashboardData }) {
 
         {/* Recent activity */}
         <div
-          className="lg:col-span-2 rounded-xl overflow-hidden"
-          style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+          style={{
+            background: 'var(--card)',
+            boxShadow: 'var(--shadow-card)',
+            borderRadius: 14,
+            overflow: 'hidden',
+          }}
         >
+          {/* Card header */}
           <div
-            className="px-5 py-4"
-            style={{ borderBottom: '1px solid var(--border)' }}
+            style={{
+              padding: '1rem 1.25rem',
+              borderBottom: '1px solid var(--border)',
+            }}
           >
-            <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>
+            <p style={sectionLabel}>Interações</p>
+            <p
+              style={{
+                fontSize: '0.9375rem',
+                fontWeight: 700,
+                color: 'var(--foreground)',
+                margin: '0.15rem 0 0',
+                letterSpacing: '-0.01em',
+              }}
+            >
               Atividade recente
             </p>
           </div>
 
           {recent.length === 0 ? (
-            <div className="px-5 py-8 text-center">
-              <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                Sem interações registadas.
-              </p>
+            <div
+              style={{
+                padding: '3rem 1.25rem',
+                textAlign: 'center',
+                color: 'var(--muted-foreground)',
+                fontSize: '0.875rem',
+              }}
+            >
+              Sem interações registadas.
             </div>
           ) : (
-            <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-              {recent.map((i) => {
+            <div>
+              {recent.map((i, idx) => {
                 const Icon = INTERACTION_ICONS[i.type] ?? FileText
-                const iconColor = INTERACTION_CHANNEL_COLORS[i.type]
+                const iconColor = INTERACTION_CHANNEL_COLORS[i.type] ?? '#9CA3AF'
                 return (
                   <Link
                     key={i.id}
                     href={`/customers/${i.customer_id}`}
-                    className="flex items-start gap-3 px-5 py-3.5 hover:bg-[var(--muted)] transition-colors"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '0.75rem',
+                      padding: '0.875rem 1.25rem',
+                      borderBottom: idx < recent.length - 1 ? '1px solid var(--border)' : 'none',
+                      textDecoration: 'none',
+                      transition: 'background 120ms',
+                      background: 'transparent',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--muted)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   >
+                    {/* Channel icon bubble */}
                     <div
-                      className="mt-0.5 w-6 h-6 rounded-md flex items-center justify-center shrink-0"
-                      style={{ background: `${iconColor}18` }}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 9,
+                        background: `${iconColor}1A`,
+                        border: `1px solid ${iconColor}30`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        marginTop: 1,
+                      }}
                     >
-                      <Icon className="h-3.5 w-3.5" style={{ color: iconColor }} />
+                      <Icon style={{ width: 14, height: 14, color: iconColor }} />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-medium truncate" style={{ color: 'var(--foreground)' }}>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p
+                        style={{
+                          fontSize: '0.875rem',
+                          fontWeight: 600,
+                          color: 'var(--foreground)',
+                          margin: 0,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
                         {i.customers?.name ?? 'Desconhecido'}
                       </p>
-                      <p className="text-[11px] truncate mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                        {i.subject ?? i.content?.slice(0, 45) ?? i.type}
+                      <p
+                        style={{
+                          fontSize: '0.75rem',
+                          color: 'var(--muted-foreground)',
+                          margin: '0.2rem 0 0',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          fontWeight: 400,
+                        }}
+                      >
+                        {i.subject ?? i.content?.slice(0, 50) ?? i.type}
                       </p>
                     </div>
-                    <span className="text-[11px] shrink-0 mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+
+                    <span
+                      style={{
+                        fontSize: '0.6875rem',
+                        fontWeight: 500,
+                        color: 'var(--muted-foreground)',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                        marginTop: 3,
+                        opacity: 0.8,
+                      }}
+                    >
                       {timeAgo(i.occurred_at)}
                     </span>
                   </Link>
