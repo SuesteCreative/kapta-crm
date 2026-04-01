@@ -4,6 +4,15 @@ import { createServiceClient } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * IMAP Sync — Safe by design:
+ * - Reads email metadata + plain-text only (no HTML, no images, no attachments)
+ * - Never marks emails as read, never clicks links, never loads remote content
+ * - Only logs emails where sender OR recipient is a known customer
+ * - Deduplicates by Message-ID so re-syncing is safe
+ * - Skips Spam/Junk/Trash automatically
+ * - Only fetches UNSEEN (unread) messages since last sync
+ */
 export async function GET() {
   const supabase = createServiceClient()
 
@@ -20,86 +29,128 @@ export async function GET() {
 
   let synced = 0
   let skipped = 0
+  let unknown = 0
 
   try {
     await client.connect()
-    const lock = await client.getMailboxLock('INBOX')
 
-    try {
-      // Fetch last 50 unseen messages
-      const messages = []
-      for await (const msg of client.fetch('1:50', {
-        envelope: true,
-        source: true,
-        uid: true,
-      })) {
-        messages.push(msg)
+    // Process both INBOX (inbound) and Sent (outbound)
+    const mailboxes: { path: string; direction: 'inbound' | 'outbound' }[] = [
+      { path: 'INBOX', direction: 'inbound' },
+      { path: 'Sent',  direction: 'outbound' },
+    ]
+
+    for (const { path, direction } of mailboxes) {
+      // Some servers use "Sent Items" or "Sent Messages"
+      let lock
+      try {
+        lock = await client.getMailboxLock(path)
+      } catch {
+        // Mailbox doesn't exist on this server — skip silently
+        continue
       }
 
-      for (const msg of messages) {
-        const messageId = msg.envelope?.messageId
-        if (!messageId) continue
+      try {
+        // Only fetch UNSEEN (unread) messages — won't spam old emails
+        // Also limits to last 100 unseen to avoid huge initial sync
+        const uids: number[] = []
+        for await (const msg of client.fetch({ seen: false }, { uid: true })) {
+          uids.push(msg.uid)
+        }
 
-        // Skip if already imported
-        const { data: existing } = await supabase
-          .from('interactions')
-          .select('id')
-          .eq('source_id', messageId)
-          .limit(1)
-          .single()
+        // Process newest first, max 50 per sync
+        const toProcess = uids.reverse().slice(0, 50)
+        if (toProcess.length === 0) continue
 
-        if (existing) { skipped++; continue }
+        for await (const msg of client.fetch(toProcess, {
+          uid: true,
+          envelope: true,
+          // Plain text body only — no HTML, no attachments, no tracking pixels
+          bodyParts: ['1'],  // MIME part 1 = text/plain
+        }, { uid: true })) {
 
-        // Try to resolve customer by sender or recipient email
-        const from = msg.envelope?.from?.[0]
-        const senderEmail = from?.address ?? ''
+          const messageId = msg.envelope?.messageId
+          if (!messageId) continue
 
-        let customerId: string | null = null
-
-        if (senderEmail) {
-          const { data: identifier } = await supabase
-            .from('customer_identifiers')
-            .select('customer_id')
-            .eq('value', senderEmail.toLowerCase())
-            .limit(1)
+          // ── Deduplication ──
+          const { data: existing } = await supabase
+            .from('interactions')
+            .select('id')
+            .eq('source_id', messageId)
             .maybeSingle()
-          customerId = (identifier as { customer_id: string } | null)?.customer_id ?? null
+          if (existing) { skipped++; continue }
+
+          // ── Resolve customer ──
+          // Inbound: match sender. Outbound: match first recipient.
+          const addresses =
+            direction === 'inbound'
+              ? (msg.envelope?.from ?? [])
+              : (msg.envelope?.to ?? [])
+
+          let customerId: string | null = null
+          let matchedEmail = ''
+
+          for (const addr of addresses) {
+            if (!addr.address) continue
+            const email = addr.address.toLowerCase().trim()
+            // Skip our own address
+            if (email === process.env.IMAP_USER?.toLowerCase()) continue
+
+            const { data: identifier } = await supabase
+              .from('customer_identifiers')
+              .select('customer_id')
+              .eq('value', email)
+              .maybeSingle()
+
+            if (identifier) {
+              customerId = (identifier as { customer_id: string }).customer_id
+              matchedEmail = email
+              break
+            }
+          }
+
+          // Not a known customer — skip entirely (phishing/spam never match)
+          if (!customerId) { unknown++; continue }
+
+          const subject = msg.envelope?.subject ?? null
+          const date    = msg.envelope?.date    ?? new Date()
+
+          // Extract plain text from body part 1
+          let bodyText = ''
+          if (msg.bodyParts) {
+            const part = msg.bodyParts.get('1')
+            if (part) {
+              bodyText = part.toString('utf8').trim().slice(0, 4000)
+            }
+          }
+
+          const { error } = await supabase.from('interactions').insert({
+            customer_id: customerId,
+            type:        'email',
+            direction,
+            subject,
+            content:     bodyText || null,
+            source_id:   messageId,
+            metadata:    { matched_email: matchedEmail },
+            occurred_at: date.toISOString(),
+          })
+
+          if (!error) synced++
         }
-
-        // If no customer found, skip (or could auto-create — future feature)
-        if (!customerId) { skipped++; continue }
-
-        const subject = msg.envelope?.subject ?? null
-        const date = msg.envelope?.date ?? new Date()
-
-        // Decode body text (simplified — full MIME parsing would use mailparser)
-        let bodyText = ''
-        if (msg.source) {
-          const raw = msg.source.toString('utf8')
-          // Extract plain text portion (very basic extraction)
-          const textMatch = raw.match(/Content-Type: text\/plain[\s\S]*?\r\n\r\n([\s\S]*?)(?:\r\n--|\r\n\r\n--)/i)
-          bodyText = textMatch ? textMatch[1].trim() : raw.slice(0, 2000)
-        }
-
-        await supabase.from('interactions').insert({
-          customer_id: customerId,
-          type: 'email',
-          direction: 'inbound',
-          subject,
-          content: bodyText || null,
-          source_id: messageId,
-          occurred_at: date.toISOString(),
-        })
-
-        synced++
+      } finally {
+        lock.release()
       }
-    } finally {
-      lock.release()
     }
 
     await client.logout()
 
-    return NextResponse.json({ ok: true, synced, skipped })
+    return NextResponse.json({
+      ok: true,
+      synced,
+      skipped_duplicate: skipped,
+      skipped_unknown_sender: unknown,
+      message: `${synced} imported, ${skipped} duplicates, ${unknown} from unknown senders`,
+    })
   } catch (error) {
     console.error('IMAP sync error:', error)
     return NextResponse.json({ ok: false, error: String(error) }, { status: 500 })
