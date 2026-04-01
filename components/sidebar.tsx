@@ -7,6 +7,7 @@ import {
   LayoutDashboard, Users, CalendarCheck, Ticket,
   FileText, RefreshCw, ChevronRight, Loader2,
 } from 'lucide-react'
+import { toast } from 'sonner'
 
 const nav = [
   { href: '/',            label: 'Dashboard',   icon: LayoutDashboard },
@@ -24,8 +25,20 @@ export function Sidebar() {
   async function syncEmail() {
     setSyncing(true)
     try {
-      await fetch('/api/imap/sync')
-      router.refresh()
+      const res = await fetch('/api/imap/sync')
+      const data = await res.json()
+      if (data.ok) {
+        toast.success(`Sync concluído — ${data.synced} importados`, {
+          description: data.skipped_duplicate > 0
+            ? `${data.skipped_duplicate} duplicados ignorados`
+            : undefined,
+        })
+        router.refresh()
+      } else {
+        toast.error('Erro ao sincronizar email', { description: data.error })
+      }
+    } catch (e) {
+      toast.error('Erro ao sincronizar email', { description: String(e) })
     } finally {
       setSyncing(false)
     }
