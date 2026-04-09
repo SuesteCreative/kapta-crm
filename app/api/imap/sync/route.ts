@@ -52,10 +52,12 @@ export async function GET() {
       }
 
       try {
-        // Only fetch UNSEEN (unread) messages — won't spam old emails
-        // Also limits to last 100 unseen to avoid huge initial sync
+        // Fetch emails from the last 30 days regardless of read status
+        // Deduplication by source_id prevents double imports on re-sync
+        const since = new Date()
+        since.setDate(since.getDate() - 30)
         const uids: number[] = []
-        for await (const msg of client.fetch({ seen: false }, { uid: true })) {
+        for await (const msg of client.fetch({ since }, { uid: true })) {
           uids.push(msg.uid)
         }
 
