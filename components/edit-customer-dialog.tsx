@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,20 +11,27 @@ import { Separator } from '@/components/ui/separator'
 import { Plus, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
-import type { CustomerWithIdentifiers } from '@/lib/database.types'
+import type { CustomerWithIdentifiers, Company } from '@/lib/database.types'
 
 interface Props { open: boolean; customer: CustomerWithIdentifiers; onClose: () => void }
 
 export function EditCustomerDialog({ open, customer, onClose }: Props) {
   const [loading, setLoading] = useState(false)
+  const [companies, setCompanies] = useState<Company[]>([])
   const [form, setForm] = useState({
     name: customer.name,
     company: customer.company ?? '',
+    company_id: customer.company_id ?? '',
     plan: customer.plan ?? '',
     status: customer.status,
     health_score: customer.health_score,
     notes: customer.notes ?? '',
   })
+
+  useEffect(() => {
+    if (!open) return
+    supabase.from('companies').select('id, name').order('name').then(({ data }) => setCompanies(data ?? []))
+  }, [open])
   const [newId, setNewId] = useState({ type: 'email' as 'email' | 'phone' | 'whatsapp', value: '', is_primary: false })
 
   async function handleSave(e: React.FormEvent) {
@@ -34,6 +41,7 @@ export function EditCustomerDialog({ open, customer, onClose }: Props) {
       const { error } = await supabase.from('customers').update({
         name: form.name.trim(),
         company: form.company || null,
+        company_id: form.company_id || null,
         plan: form.plan || null,
         status: form.status,
         health_score: form.health_score,
@@ -75,7 +83,16 @@ export function EditCustomerDialog({ open, customer, onClose }: Props) {
             </div>
             <div className="space-y-1.5">
               <Label>Empresa</Label>
-              <Input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
+              <Select value={form.company_id || '__none__'} onValueChange={(v) => {
+                const selected = companies.find((c) => c.id === v)
+                setForm({ ...form, company_id: v === '__none__' ? '' : v, company: selected?.name ?? form.company })
+              }}>
+                <SelectTrigger><SelectValue placeholder="Sem empresa" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sem empresa</SelectItem>
+                  {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">

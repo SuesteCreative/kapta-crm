@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,15 +8,22 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
+import type { Company } from '@/lib/database.types'
 
 interface Props { open: boolean; onClose: () => void }
 
 export function NewCustomerDialog({ open, onClose }: Props) {
   const [loading, setLoading] = useState(false)
+  const [companies, setCompanies] = useState<Company[]>([])
   const [form, setForm] = useState({
-    name: '', company: '', plan: '', status: 'onboarding' as const,
+    name: '', company: '', company_id: '', plan: '', status: 'onboarding' as const,
     email: '', phone: '',
   })
+
+  useEffect(() => {
+    if (!open) return
+    supabase.from('companies').select('id, name').order('name').then(({ data }) => setCompanies(data ?? []))
+  }, [open])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -25,7 +32,7 @@ export function NewCustomerDialog({ open, onClose }: Props) {
     try {
       const { data: customer, error } = await supabase
         .from('customers')
-        .insert({ name: form.name.trim(), company: form.company || null, plan: form.plan || null, status: form.status })
+        .insert({ name: form.name.trim(), company: form.company || null, company_id: form.company_id || null, plan: form.plan || null, status: form.status })
         .select()
         .single()
       if (error || !customer) throw error
@@ -36,7 +43,7 @@ export function NewCustomerDialog({ open, onClose }: Props) {
       if (identifiers.length) await supabase.from('customer_identifiers').insert(identifiers)
 
       toast.success('Cliente criado com sucesso!')
-      setForm({ name: '', company: '', plan: '', status: 'onboarding', email: '', phone: '' })
+      setForm({ name: '', company: '', company_id: '', plan: '', status: 'onboarding', email: '', phone: '' })
       onClose()
     } catch {
       toast.error('Erro ao criar cliente.')
@@ -59,7 +66,16 @@ export function NewCustomerDialog({ open, onClose }: Props) {
             </div>
             <div className="space-y-1.5">
               <Label>Empresa</Label>
-              <Input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="Nome da empresa" />
+              <Select value={form.company_id || '__none__'} onValueChange={(v) => {
+                const selected = companies.find((c) => c.id === v)
+                setForm({ ...form, company_id: v === '__none__' ? '' : v, company: selected?.name ?? '' })
+              }}>
+                <SelectTrigger><SelectValue placeholder="Sem empresa" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sem empresa</SelectItem>
+                  {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">

@@ -6,10 +6,26 @@ export type FollowUpStatus = 'open' | 'done' | 'snoozed'
 export type TicketStatus = 'open' | 'in-progress' | 'resolved' | 'closed'
 export type IdentifierType = 'email' | 'phone' | 'whatsapp'
 
+export interface Company {
+  id: string
+  name: string
+  domain: string | null
+  website: string | null
+  industry: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CompanyWithContacts extends Company {
+  customers: CustomerWithIdentifiers[]
+}
+
 export interface Customer {
   id: string
   name: string
   company: string | null
+  company_id: string | null
   status: CustomerStatus
   plan: string | null
   health_score: number
@@ -95,6 +111,7 @@ export interface CustomerWithStats extends Customer {
 export type Database = {
   public: {
     Tables: {
+      companies: { Row: Company; Insert: Omit<Company, 'id' | 'created_at' | 'updated_at'>; Update: Partial<Omit<Company, 'id'>> }
       customers: { Row: Customer; Insert: Omit<Customer, 'id' | 'created_at' | 'updated_at'>; Update: Partial<Omit<Customer, 'id'>> }
       customer_identifiers: { Row: CustomerIdentifier; Insert: Omit<CustomerIdentifier, 'id' | 'created_at'>; Update: Partial<Omit<CustomerIdentifier, 'id'>> }
       interactions: { Row: Interaction; Insert: Omit<Interaction, 'id' | 'created_at'>; Update: Partial<Omit<Interaction, 'id'>> }

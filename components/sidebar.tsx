@@ -5,13 +5,14 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import {
   LayoutDashboard, Users, CalendarCheck, Ticket,
-  FileText, RefreshCw, ChevronRight, Loader2,
+  FileText, RefreshCw, ChevronRight, Loader2, Building2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 const nav = [
   { href: '/',            label: 'Dashboard',   icon: LayoutDashboard },
   { href: '/customers',   label: 'Clientes',    icon: Users },
+  { href: '/companies',   label: 'Empresas',    icon: Building2 },
   { href: '/follow-ups',  label: 'Follow-ups',  icon: CalendarCheck },
   { href: '/tickets',     label: 'Tickets',     icon: Ticket },
   { href: '/templates',   label: 'Templates',   icon: FileText },
