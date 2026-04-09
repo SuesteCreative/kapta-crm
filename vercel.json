@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "app/api/imap/sync/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

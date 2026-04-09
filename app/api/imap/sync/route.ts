@@ -52,17 +52,14 @@ export async function GET() {
       }
 
       try {
-        // Fetch emails from the last 30 days regardless of read status
-        // Deduplication by source_id prevents double imports on re-sync
-        const since = new Date()
-        since.setDate(since.getDate() - 30)
+        // Fetch all emails — deduplication by source_id prevents double imports
         const uids: number[] = []
-        for await (const msg of client.fetch({ since }, { uid: true })) {
+        for await (const msg of client.fetch('1:*', { uid: true })) {
           uids.push(msg.uid)
         }
 
-        // Process newest first, max 50 per sync
-        const toProcess = uids.reverse().slice(0, 50)
+        // Process newest first, max 500 per sync run
+        const toProcess = uids.reverse().slice(0, 500)
         if (toProcess.length === 0) continue
 
         for await (const msg of client.fetch(toProcess, {
