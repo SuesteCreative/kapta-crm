@@ -2,10 +2,11 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Building2, Plus, Search, Globe, Users } from 'lucide-react'
+import { Building2, Plus, Search, Globe, Users, MailSearch, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NewCompanyDialog } from '@/components/new-company-dialog'
+import { toast } from 'sonner'
 
 interface CompanyRow {
   id: string
@@ -23,6 +24,22 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [showNew, setShowNew] = useState(false)
+  const [importing, setImporting] = useState(false)
+
+  async function handleEmailImport() {
+    setImporting(true)
+    try {
+      const res = await fetch('/api/email/import-contacts')
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error ?? 'Erro desconhecido')
+      toast.success(json.message)
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao importar contactos.')
+    } finally {
+      setImporting(false)
+    }
+  }
 
   const filtered = companies.filter((c) => {
     if (!search) return true
@@ -44,13 +61,27 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
             {companies.length} empresa{companies.length !== 1 ? 's' : ''} registada{companies.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <Button
-          onClick={() => setShowNew(true)}
-          className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
-          style={{ background: 'var(--primary)', color: '#fff' }}
-        >
-          <Plus className="h-3.5 w-3.5" /> Nova empresa
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={handleEmailImport}
+            disabled={importing}
+            className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+          >
+            {importing
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <MailSearch className="h-3.5 w-3.5" />}
+            {importing ? 'A importar…' : 'Importar do email'}
+          </Button>
+          <Button
+            onClick={() => setShowNew(true)}
+            className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+            style={{ background: 'var(--primary)', color: '#fff' }}
+          >
+            <Plus className="h-3.5 w-3.5" /> Nova empresa
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
