@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Mail, MessageSquare, Video, Phone, FileText,
   Plus, ExternalLink, Heart, Building2, Tag,
-  CheckCircle2, Circle, Pencil, ArrowLeft,
+  CheckCircle2, Circle, Pencil, ArrowLeft, ClipboardPaste,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -20,6 +20,8 @@ import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
 import { TicketBuilderDialog } from '@/components/ticket-builder-dialog'
 import { EditCustomerDialog } from '@/components/edit-customer-dialog'
 import { BubblesVideoModal } from '@/components/bubbles-video-modal'
+import { PasteConversationDialog } from '@/components/paste-conversation-dialog'
+import { SendEmailDialog } from '@/components/send-email-dialog'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import Link from 'next/link'
@@ -41,11 +43,13 @@ const CHANNEL_CONFIG: Record<string, { icon: React.ElementType; color: string; b
 
 export function CustomerDetailClient({ customer, interactions, followUps, tickets }: Props) {
   const router = useRouter()
-  const [showAddInteraction, setShowAddInteraction] = useState(false)
-  const [showAddFollowUp,    setShowAddFollowUp]    = useState(false)
-  const [showTicketBuilder,  setShowTicketBuilder]  = useState(false)
-  const [showEditCustomer,   setShowEditCustomer]   = useState(false)
-  const [bubblesUrl,         setBubblesUrl]         = useState<string | null>(null)
+  const [showAddInteraction,    setShowAddInteraction]    = useState(false)
+  const [showAddFollowUp,       setShowAddFollowUp]       = useState(false)
+  const [showTicketBuilder,     setShowTicketBuilder]     = useState(false)
+  const [showEditCustomer,      setShowEditCustomer]      = useState(false)
+  const [showPasteConversation, setShowPasteConversation] = useState(false)
+  const [showSendEmail,         setShowSendEmail]         = useState(false)
+  const [bubblesUrl,            setBubblesUrl]            = useState<string | null>(null)
 
   const openFollowUps = followUps.filter((f) => f.status === 'open')
   const doneFollowUps = followUps.filter((f) => f.status === 'done')
@@ -134,9 +138,11 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
 
           {/* Actions */}
           <div className="flex gap-2 flex-wrap justify-end shrink-0">
-            <ActionBtn icon={Pencil} label="Editar" onClick={() => setShowEditCustomer(true)} />
-            <ActionBtn icon={Plus}   label="Follow-up" onClick={() => setShowAddFollowUp(true)} />
-            <ActionBtn icon={Plus}   label="Interação" onClick={() => setShowAddInteraction(true)} />
+            <ActionBtn icon={Pencil}         label="Editar"          onClick={() => setShowEditCustomer(true)} />
+            <ActionBtn icon={Mail}           label="Enviar email"    onClick={() => setShowSendEmail(true)} />
+            <ActionBtn icon={ClipboardPaste} label="Colar conversa"  onClick={() => setShowPasteConversation(true)} />
+            <ActionBtn icon={Plus}           label="Follow-up"       onClick={() => setShowAddFollowUp(true)} />
+            <ActionBtn icon={Plus}           label="Interação"       onClick={() => setShowAddInteraction(true)} />
             <Button
               size="sm"
               onClick={() => setShowTicketBuilder(true)}
@@ -357,11 +363,20 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
       </Tabs>
 
       {/* Modals */}
-      <AddInteractionDialog open={showAddInteraction} customerId={customer.id} onClose={() => { setShowAddInteraction(false); refresh() }} />
-      <AddFollowUpDialog    open={showAddFollowUp}    customerId={customer.id} onClose={() => { setShowAddFollowUp(false);    refresh() }} />
-      <TicketBuilderDialog  open={showTicketBuilder}  customer={customer}      onClose={() => { setShowTicketBuilder(false);  refresh() }} />
-      <EditCustomerDialog   open={showEditCustomer}   customer={customer}      onClose={() => { setShowEditCustomer(false);   refresh() }} />
-      <BubblesVideoModal    url={bubblesUrl}                                   onClose={() => setBubblesUrl(null)} />
+      <AddInteractionDialog    open={showAddInteraction}    customerId={customer.id} onClose={() => { setShowAddInteraction(false);    refresh() }} />
+      <AddFollowUpDialog       open={showAddFollowUp}       customerId={customer.id} onClose={() => { setShowAddFollowUp(false);       refresh() }} />
+      <TicketBuilderDialog     open={showTicketBuilder}     customer={customer}      onClose={() => { setShowTicketBuilder(false);     refresh() }} />
+      <EditCustomerDialog      open={showEditCustomer}      customer={customer}      onClose={() => { setShowEditCustomer(false);      refresh() }} />
+      <PasteConversationDialog open={showPasteConversation} customerId={customer.id} onClose={() => { setShowPasteConversation(false); refresh() }} />
+      <SendEmailDialog
+        open={showSendEmail}
+        customerId={customer.id}
+        customerEmail={customer.customer_identifiers.find((i) => i.type === 'email')?.value ?? ''}
+        customerName={customer.name}
+        customerCompany={customer.company}
+        onClose={() => { setShowSendEmail(false); refresh() }}
+      />
+      <BubblesVideoModal url={bubblesUrl} onClose={() => setBubblesUrl(null)} />
     </div>
   )
 }

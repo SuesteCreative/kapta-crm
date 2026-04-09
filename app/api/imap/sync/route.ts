@@ -24,6 +24,7 @@ export async function GET() {
       user: process.env.IMAP_USER!,
       pass: process.env.IMAP_PASSWORD!,
     },
+    tls: { rejectUnauthorized: false },
     logger: false,
   })
 
@@ -152,7 +153,15 @@ export async function GET() {
       message: `${synced} imported, ${skipped} duplicates, ${unknown} from unknown senders`,
     })
   } catch (error) {
-    console.error('IMAP sync error:', error)
-    return NextResponse.json({ ok: false, error: String(error) }, { status: 500 })
+    const host = process.env.IMAP_HOST ?? '(not set)'
+    const port = process.env.IMAP_PORT ?? '993'
+    const detail = error instanceof Error
+      ? { message: error.message, response: (error as Record<string, unknown>).response, code: (error as Record<string, unknown>).code }
+      : String(error)
+    console.error(`IMAP sync error connecting to ${host}:${port}:`, detail)
+    return NextResponse.json(
+      { ok: false, error: String(error), detail, host, port },
+      { status: 500 }
+    )
   }
 }
