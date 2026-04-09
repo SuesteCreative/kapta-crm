@@ -79,7 +79,7 @@ export async function GET() {
         const uids: number[] = []
         for await (const msg of client.fetch('1:*', { uid: true })) uids.push(msg.uid)
 
-        const toProcess = uids.reverse().slice(0, 1000)
+        const toProcess = uids.reverse().slice(0, 500)
         if (!toProcess.length) continue
 
         for await (const msg of client.fetch(toProcess, { uid: true, envelope: true }, { uid: true })) {
