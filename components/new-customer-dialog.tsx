@@ -22,7 +22,7 @@ export function NewCustomerDialog({ open, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return
-    supabase.from('companies').select('id, name').order('name').then(({ data }) => setCompanies(data ?? []))
+    supabase.from('companies').select('id, name').order('name').then(({ data }) => setCompanies((data ?? []) as Company[]))
   }, [open])
 
   async function handleSubmit(e: React.FormEvent) {

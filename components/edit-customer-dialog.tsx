@@ -30,7 +30,7 @@ export function EditCustomerDialog({ open, customer, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return
-    supabase.from('companies').select('id, name').order('name').then(({ data }) => setCompanies(data ?? []))
+    supabase.from('companies').select('id, name').order('name').then(({ data }) => setCompanies((data ?? []) as Company[]))
   }, [open])
   const [newId, setNewId] = useState({ type: 'email' as 'email' | 'phone' | 'whatsapp', value: '', is_primary: false })
 
