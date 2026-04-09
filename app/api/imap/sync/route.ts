@@ -155,8 +155,9 @@ export async function GET() {
   } catch (error) {
     const host = process.env.IMAP_HOST ?? '(not set)'
     const port = process.env.IMAP_PORT ?? '993'
+    const err = error as unknown as Record<string, unknown>
     const detail = error instanceof Error
-      ? { message: error.message, response: (error as Record<string, unknown>).response, code: (error as Record<string, unknown>).code }
+      ? { message: error.message, response: err.response, code: err.code }
       : String(error)
     console.error(`IMAP sync error connecting to ${host}:${port}:`, detail)
     return NextResponse.json(
