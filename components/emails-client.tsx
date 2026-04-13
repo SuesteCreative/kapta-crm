@@ -152,8 +152,7 @@ export function EmailsClient({ emails: initial }: { emails: EmailRow[] }) {
         style={{
           background: 'var(--card)',
           boxShadow: 'var(--shadow-card)',
-          borderColor: 'var(--border)',
-          divideColor: 'var(--border)',
+          border: '1px solid var(--border)',
         }}
       >
         {filtered.length === 0 && (
