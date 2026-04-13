@@ -7,6 +7,8 @@ export const dynamic = 'force-dynamic'
 interface RequestBody {
   customer_id: string
   to: string
+  cc?: string
+  bcc?: string
   subject: string
   body: string
 }
@@ -44,7 +46,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const { customer_id, to, subject, body } = data
+  const { customer_id, to, cc, bcc, subject, body } = data
 
   if (!customer_id || !to || !subject || !body) {
     return NextResponse.json({ ok: false, error: 'customer_id, to, subject, body required' }, { status: 400 })
@@ -86,6 +88,8 @@ ${sigHtml ? `<br><br>${sigHtml}` : ''}
     const info = await transporter.sendMail({
       from: process.env.SMTP_USER,
       to,
+      ...(cc ? { cc } : {}),
+      ...(bcc ? { bcc } : {}),
       subject,
       text: textEmail,
       html: htmlEmail,
@@ -105,7 +109,7 @@ ${sigHtml ? `<br><br>${sigHtml}` : ''}
     subject,
     content: textEmail,
     source_id: messageId,
-    metadata: { source: 'crm' },
+    metadata: { source: 'crm', cc: cc ?? null, bcc: bcc ?? null },
     occurred_at: new Date().toISOString(),
   })
 

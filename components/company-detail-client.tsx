@@ -465,6 +465,11 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
           customerEmail={primaryEmail(emailFor)}
           customerName={selectedCustomer.name}
           customerCompany={company.name}
+          allEmails={customers.flatMap((c) =>
+            c.customer_identifiers
+              .filter((i) => i.type === 'email')
+              .map((i) => ({ label: c.name, email: i.value }))
+          )}
           onClose={() => { setEmailFor(null); router.refresh() }}
         />
       )}

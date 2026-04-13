@@ -786,6 +786,9 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
         customerName={customer.name}
         customerCompany={customer.company}
         interactions={interactions}
+        allEmails={customer.customer_identifiers
+          .filter((i) => i.type === 'email')
+          .map((i) => ({ label: customer.name, email: i.value }))}
         onClose={() => { setShowSendEmail(false); refresh() }}
       />
       <BubblesVideoModal url={bubblesUrl} onClose={() => setBubblesUrl(null)} />

@@ -7,10 +7,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Sparkles, Loader2 } from 'lucide-react'
+import { Sparkles, Loader2, ChevronDown, ChevronUp, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import type { Template, Interaction } from '@/lib/database.types'
+
+export interface EmailContact {
+  label: string
+  email: string
+}
 
 interface Props {
   open: boolean
@@ -19,6 +24,8 @@ interface Props {
   customerName: string
   customerCompany?: string | null
   interactions?: Interaction[]
+  /** All known contacts for this customer / company — shown as quick-add chips */
+  allEmails?: EmailContact[]
   onClose: () => void
 }
 
@@ -28,8 +35,120 @@ function applyTemplate(body: string, name: string, company: string | null | unde
     .replace(/\{\{company\}\}/gi, company ?? name)
 }
 
-export function SendEmailDialog({ open, customerId, customerEmail, customerName, customerCompany, interactions = [], onClose }: Props) {
+/** Parse comma/semicolon-separated email string into trimmed list */
+function parseEmails(raw: string): string[] {
+  return raw
+    .split(/[,;]/)
+    .map((e) => e.trim())
+    .filter(Boolean)
+}
+
+/** Tag-chip component for a field */
+function EmailTagInput({
+  label,
+  value,
+  onChange,
+  suggestions = [],
+  placeholder = 'email@exemplo.com',
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  suggestions?: EmailContact[]
+  placeholder?: string
+}) {
+  const tags = parseEmails(value)
+  const remaining = suggestions.filter((s) => !tags.includes(s.email))
+
+  function addTag(email: string) {
+    const next = tags.includes(email) ? tags : [...tags, email]
+    onChange(next.join(', '))
+  }
+
+  function removeTag(email: string) {
+    onChange(tags.filter((t) => t !== email).join(', '))
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    // When user presses comma/enter/tab — normalize
+    if ([',', ';', 'Enter', 'Tab'].includes(e.key)) {
+      e.preventDefault()
+      const raw = (e.currentTarget as HTMLInputElement).value.trim()
+      if (raw) addTag(raw)
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>{label}</Label>
+
+      {/* Tag row + input */}
+      <div
+        className="flex flex-wrap gap-1.5 p-2 rounded-lg min-h-[36px]"
+        style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}
+      >
+        {tags.map((t) => (
+          <span
+            key={t}
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+            style={{ background: 'rgba(91,91,214,0.15)', color: 'var(--primary)' }}
+          >
+            {t}
+            <button onClick={() => removeTag(t)} className="hover:opacity-70">
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </span>
+        ))}
+        <input
+          className="flex-1 min-w-[140px] bg-transparent text-sm outline-none"
+          style={{ color: 'var(--foreground)' }}
+          placeholder={tags.length === 0 ? placeholder : ''}
+          onKeyDown={handleKeyDown}
+          onBlur={(e) => {
+            const raw = e.currentTarget.value.trim()
+            if (raw) { addTag(raw); e.currentTarget.value = '' }
+          }}
+          onChange={() => {}}
+        />
+      </div>
+
+      {/* Contact quick-add chips */}
+      {remaining.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {remaining.map((s) => (
+            <button
+              key={s.email}
+              onClick={() => addTag(s.email)}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-opacity hover:opacity-70"
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                color: 'var(--muted-foreground)',
+              }}
+            >
+              + {s.label} &lt;{s.email}&gt;
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function SendEmailDialog({
+  open,
+  customerId,
+  customerEmail,
+  customerName,
+  customerCompany,
+  interactions = [],
+  allEmails = [],
+  onClose,
+}: Props) {
   const [to,        setTo]        = useState(customerEmail)
+  const [cc,        setCc]        = useState('')
+  const [bcc,       setBcc]       = useState('')
+  const [showCcBcc, setShowCcBcc] = useState(false)
   const [subject,   setSubject]   = useState('')
   const [body,      setBody]      = useState('')
   const [templates, setTemplates] = useState<Template[]>([])
@@ -43,6 +162,9 @@ export function SendEmailDialog({ open, customerId, customerEmail, customerName,
     if (!open) return
     setSubject('')
     setBody('')
+    setCc('')
+    setBcc('')
+    setShowCcBcc(false)
     supabase
       .from('templates')
       .select('*')
@@ -105,7 +227,14 @@ export function SendEmailDialog({ open, customerId, customerEmail, customerName,
       const res = await fetch('/api/email/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customer_id: customerId, to, subject, body }),
+        body: JSON.stringify({
+          customer_id: customerId,
+          to,
+          ...(cc  ? { cc }  : {}),
+          ...(bcc ? { bcc } : {}),
+          subject,
+          body,
+        }),
       })
       const data = await res.json()
       if (!res.ok || !data.ok) throw new Error(data.error ?? 'Erro desconhecido')
@@ -122,10 +251,19 @@ export function SendEmailDialog({ open, customerId, customerEmail, customerName,
   function handleClose() {
     setSubject('')
     setBody('')
+    setCc('')
+    setBcc('')
     onClose()
   }
 
   const hasEmailHistory = interactions.some((i) => i.type === 'email')
+
+  // Suggestions for CC: all contacts except the TO address
+  const toEmails = parseEmails(to)
+  const ccSuggestions = allEmails.filter((e) => !toEmails.includes(e.email))
+  const bccSuggestions = allEmails.filter(
+    (e) => !toEmails.includes(e.email) && !parseEmails(cc).includes(e.email)
+  )
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
@@ -154,7 +292,6 @@ export function SendEmailDialog({ open, customerId, customerEmail, customerName,
                   ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> A gerar rascunho…</>
                   : <><Sparkles className="h-3.5 w-3.5" /> Gerar resposta com IA</>}
               </Button>
-              {/* Language toggle */}
               <div
                 className="flex items-center rounded-lg overflow-hidden shrink-0"
                 style={{ border: '1px solid rgba(91,91,214,0.25)' }}
@@ -178,15 +315,42 @@ export function SendEmailDialog({ open, customerId, customerEmail, customerName,
           )}
 
           {/* To */}
-          <div className="space-y-1.5">
-            <Label className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>Para</Label>
-            <Input
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              placeholder="email@exemplo.com"
-              style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-            />
-          </div>
+          <EmailTagInput
+            label="Para"
+            value={to}
+            onChange={setTo}
+            suggestions={allEmails}
+            placeholder="email@exemplo.com"
+          />
+
+          {/* CC / BCC toggle */}
+          <button
+            onClick={() => setShowCcBcc((v) => !v)}
+            className="flex items-center gap-1 text-[12px] font-medium transition-opacity hover:opacity-70"
+            style={{ color: 'var(--muted-foreground)' }}
+          >
+            {showCcBcc ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {showCcBcc ? 'Ocultar CC / BCC' : 'Adicionar CC / BCC'}
+          </button>
+
+          {showCcBcc && (
+            <>
+              <EmailTagInput
+                label="CC"
+                value={cc}
+                onChange={setCc}
+                suggestions={ccSuggestions}
+                placeholder="cc@exemplo.com"
+              />
+              <EmailTagInput
+                label="BCC"
+                value={bcc}
+                onChange={setBcc}
+                suggestions={bccSuggestions}
+                placeholder="bcc@exemplo.com"
+              />
+            </>
+          )}
 
           {/* Template selector */}
           {templates.length > 0 && (

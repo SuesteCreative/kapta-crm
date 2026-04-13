@@ -58,8 +58,8 @@ export async function GET() {
           uids.push(msg.uid)
         }
 
-        // Process newest first, max 500 per sync run
-        const toProcess = uids.reverse().slice(0, 500)
+        // Process newest first, max 2000 per sync run
+        const toProcess = uids.reverse().slice(0, 2000)
         if (toProcess.length === 0) continue
 
         for await (const msg of client.fetch(toProcess, {
@@ -82,11 +82,11 @@ export async function GET() {
           if (existing) { skipped++; continue }
 
           // ── Resolve customer ──
-          // Inbound: match sender. Outbound: match first recipient.
+          // Inbound: match sender or CC'd contact. Outbound: match recipients.
           const addresses =
             direction === 'inbound'
-              ? (msg.envelope?.from ?? [])
-              : (msg.envelope?.to ?? [])
+              ? [...(msg.envelope?.from ?? []), ...(msg.envelope?.cc ?? [])]
+              : [...(msg.envelope?.to ?? []), ...(msg.envelope?.cc ?? [])]
 
           let customerId: string | null = null
           let matchedEmail = ''
