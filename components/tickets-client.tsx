@@ -3,14 +3,24 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check, Sparkles, Loader2, Users, Mail } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Button } from '@/components/ui/button'
 import { PRIORITY_STYLES, formatDate } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
+import { BulkEmailDialog } from '@/components/bulk-email-dialog'
 import type { Ticket } from '@/lib/database.types'
 
 type TicketWithCustomer = Ticket & { customers: { id: string; name: string; company: string | null } | null }
+
+type IssueCluster = {
+  issue_title: string
+  issue_description: string
+  customer_ids: string[]
+  customers: Array<{ id: string; name: string; company: string | null }>
+  example_summary: string
+}
 
 const TICKET_STATUS_STYLES: Record<string, { bg: string; text: string }> = {
   open:          { bg: 'rgba(229,72,77,0.1)',   text: '#C0272B' },
@@ -52,12 +62,58 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
   const [statusFilter,   setStatusFilter]   = useState('all')
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [copiedId,       setCopiedId]       = useState<string | null>(null)
+  const [clustering,               setClustering]               = useState(false)
+  const [clusters,                 setClusters]                 = useState<IssueCluster[]>([])
+  const [bulkEmailCluster,         setBulkEmailCluster]         = useState<IssueCluster | null>(null)
+  const [creatingTicketForCluster, setCreatingTicketForCluster] = useState<string | null>(null)
 
   const filtered = tickets.filter((t) => {
     if (statusFilter !== 'all' && t.status !== statusFilter) return false
     if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false
     return true
   })
+
+  async function runClusterIssues() {
+    setClustering(true)
+    setClusters([])
+    try {
+      const res = await fetch('/api/ai/cluster-issues', { method: 'POST' })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      setClusters(json.clusters)
+      if (json.clusters.length === 0) {
+        toast.success('Nenhum problema comum identificado.')
+      } else {
+        toast.success(`${json.clusters.length} grupo(s) de problemas identificado(s)`)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao agrupar problemas.')
+    } finally {
+      setClustering(false)
+    }
+  }
+
+  async function createTicketFromCluster(cluster: IssueCluster) {
+    setCreatingTicketForCluster(cluster.issue_title)
+    try {
+      const affectedNames = cluster.customers.map((c) => c.name).join(', ')
+      const { error } = await supabase.from('tickets').insert({
+        customer_id: cluster.customer_ids[0],
+        title: cluster.issue_title,
+        description: `${cluster.issue_description}\n\nClientes afetados: ${affectedNames}\n\nExemplo: ${cluster.example_summary}`,
+        priority: 'high',
+        status: 'open',
+        tags: ['cluster-ia', 'multiplos-clientes'],
+      })
+      if (error) throw error
+      toast.success('Ticket criado!')
+      router.refresh()
+    } catch {
+      toast.error('Erro ao criar ticket.')
+    } finally {
+      setCreatingTicketForCluster(null)
+    }
+  }
 
   async function updateStatus(id: string, status: string) {
     await supabase.from('tickets').update({ status }).eq('id', id)
@@ -75,14 +131,92 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
     <div className="p-7 max-w-[900px] mx-auto space-y-6 animate-fade-in">
 
       {/* Header */}
-      <div>
-        <h1 className="text-[22px] font-semibold tracking-tight" style={{ color: 'var(--foreground)' }}>
-          Tickets
-        </h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-          {tickets.filter((t) => t.status === 'open').length} abertos · {tickets.length} total
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-[22px] font-semibold tracking-tight" style={{ color: 'var(--foreground)' }}>
+            Tickets
+          </h1>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+            {tickets.filter((t) => t.status === 'open').length} abertos · {tickets.length} total
+          </p>
+        </div>
+        <Button
+          onClick={runClusterIssues}
+          disabled={clustering}
+          className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+          style={{ background: 'var(--primary)', color: '#fff' }}
+        >
+          {clustering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {clustering ? 'A analisar…' : 'Agrupar problemas'}
+        </Button>
       </div>
+
+      {/* AI Cluster cards */}
+      {clusters.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 px-1">
+            <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--primary)' }} />
+            <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--primary)' }}>
+              Grupos detetados por IA · {clusters.length}
+            </span>
+          </div>
+          {clusters.map((cluster) => (
+            <div
+              key={cluster.issue_title}
+              className="rounded-xl p-5 space-y-3"
+              style={{ background: 'var(--card)', border: '1px solid rgba(91,91,214,0.25)', boxShadow: 'var(--shadow-card)' }}
+            >
+              <div className="flex items-start gap-2">
+                <Users className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--primary)' }} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-[14px]" style={{ color: 'var(--foreground)' }}>
+                    {cluster.customers.length} clientes — {cluster.issue_title}
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                    {cluster.issue_description}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {cluster.customers.map((c) => (
+                  <span
+                    key={c.id}
+                    className="text-[11px] font-medium rounded-full px-2.5 py-0.5"
+                    style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)' }}
+                  >
+                    {c.name}{c.company ? ` · ${c.company}` : ''}
+                  </span>
+                ))}
+              </div>
+
+              <p className="text-xs italic" style={{ color: 'var(--muted-foreground)' }}>
+                &ldquo;{cluster.example_summary}&rdquo;
+              </p>
+
+              <div className="flex gap-2 pt-1">
+                <Button
+                  onClick={() => createTicketFromCluster(cluster)}
+                  disabled={creatingTicketForCluster === cluster.issue_title}
+                  className="h-8 rounded-lg text-[12px] font-medium px-3 gap-1.5"
+                  style={{ background: 'var(--primary)', color: '#fff' }}
+                >
+                  {creatingTicketForCluster === cluster.issue_title && <Loader2 className="h-3 w-3 animate-spin" />}
+                  Criar ticket
+                </Button>
+                <Button
+                  onClick={() => setBulkEmailCluster(cluster)}
+                  variant="outline"
+                  className="h-8 rounded-lg text-[12px] font-medium px-3 gap-1.5"
+                  style={{ border: '1px solid var(--border)', color: 'var(--foreground)', background: 'transparent' }}
+                >
+                  <Mail className="h-3.5 w-3.5" /> Enviar email a todos
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-2.5">
@@ -244,6 +378,14 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
           )
         })}
       </div>
+
+      {bulkEmailCluster && (
+        <BulkEmailDialog
+          open={!!bulkEmailCluster}
+          cluster={bulkEmailCluster}
+          onClose={() => setBulkEmailCluster(null)}
+        />
+      )}
     </div>
   )
 }

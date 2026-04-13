@@ -12,6 +12,24 @@ import type { FollowUp } from '@/lib/database.types'
 
 type FollowUpWithCustomer = FollowUp & { customers: { id: string; name: string; company: string | null } | null }
 
+type CommitmentSuggestion = {
+  customer_id: string
+  interaction_type: string
+  commitment_text: string
+  suggested_title: string
+  suggested_priority: 'low' | 'medium' | 'high' | 'urgent'
+  customer_name: string
+  customer_company: string | null
+}
+
+const CHANNEL_LABELS: Record<string, string> = {
+  email: '📧 email',
+  whatsapp: '💬 WhatsApp',
+  meeting: '🎥 reunião',
+  call: '📞 chamada',
+  note: '📝 nota',
+}
+
 type EmailInteraction = {
   customer_id: string
   direction: string | null
@@ -75,6 +93,9 @@ export function FollowUpsClient({
   const [tab, setTab] = useState(params.get('filter') ?? 'reply')
   const [triaging, setTriaging] = useState(false)
   const [triageMap, setTriageMap] = useState<Map<string, TriageResult>>(new Map())
+  const [detectingCommitments, setDetectingCommitments] = useState(false)
+  const [commitmentSuggestions, setCommitmentSuggestions] = useState<CommitmentSuggestion[]>([])
+  const [creatingFollowUpId, setCreatingFollowUpId] = useState<string | null>(null)
 
   const today = new Date().toISOString().split('T')[0]
   const overdue    = followUps.filter((f) => f.status === 'open' && f.due_date && f.due_date < today)
@@ -126,6 +147,46 @@ export function FollowUpsClient({
     }
   }
 
+  async function runDetectCommitments() {
+    setDetectingCommitments(true)
+    setCommitmentSuggestions([])
+    try {
+      const res = await fetch('/api/ai/detect-commitments', { method: 'POST' })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      setCommitmentSuggestions(json.results)
+      if (json.results.length === 0) {
+        toast.success('Nenhum compromisso por cumprir encontrado.')
+      } else {
+        toast.success(`${json.results.length} compromisso(s) detetado(s)`)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao detetar compromissos.')
+    } finally {
+      setDetectingCommitments(false)
+    }
+  }
+
+  async function createFollowUpFromSuggestion(s: CommitmentSuggestion) {
+    setCreatingFollowUpId(s.customer_id)
+    try {
+      const { error } = await supabase.from('follow_ups').insert({
+        customer_id: s.customer_id,
+        title: s.suggested_title,
+        description: `Compromisso detetado por IA (${CHANNEL_LABELS[s.interaction_type] ?? s.interaction_type}): "${s.commitment_text}"`,
+        priority: s.suggested_priority,
+      })
+      if (error) throw error
+      toast.success('Follow-up criado!')
+      setCommitmentSuggestions((prev) => prev.filter((x) => x.customer_id !== s.customer_id))
+      router.refresh()
+    } catch {
+      toast.error('Erro ao criar follow-up.')
+    } finally {
+      setCreatingFollowUpId(null)
+    }
+  }
+
   async function toggle(id: string, current: string) {
     const next = current === 'done' ? 'open' : 'done'
     const { error } = await supabase.from('follow_ups').update({
@@ -162,10 +223,19 @@ export function FollowUpsClient({
             className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
             style={{ background: 'var(--primary)', color: '#fff' }}
           >
-            {triaging
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              : <Sparkles className="h-3.5 w-3.5" />}
+            {triaging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             {triaging ? 'A analisar…' : 'Analisar com IA'}
+          </Button>
+        )}
+        {tab === 'open' && (
+          <Button
+            onClick={runDetectCommitments}
+            disabled={detectingCommitments}
+            className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+            style={{ background: 'var(--primary)', color: '#fff' }}
+          >
+            {detectingCommitments ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {detectingCommitments ? 'A analisar…' : 'Detetar compromissos'}
           </Button>
         )}
       </div>
@@ -278,7 +348,56 @@ export function FollowUpsClient({
       {/* Open follow-ups */}
       {tab === 'open' && (
         <div className="space-y-6">
-          {openCount === 0 && (
+          {/* AI commitment suggestions */}
+          {commitmentSuggestions.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 px-1">
+                <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--primary)' }} />
+                <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--primary)' }}>
+                  Sugestões de IA · {commitmentSuggestions.length}
+                </span>
+              </div>
+              {commitmentSuggestions.map((s) => {
+                const ps = PRIORITY_STYLES[s.suggested_priority]
+                return (
+                  <div
+                    key={s.customer_id}
+                    className="flex items-start gap-3 rounded-xl p-4"
+                    style={{ background: 'var(--card)', border: '1px solid rgba(91,91,214,0.25)', boxShadow: 'var(--shadow-card)' }}
+                  >
+                    <Sparkles className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--primary)' }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+                        {s.suggested_title}
+                      </p>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                        {s.customer_name}{s.customer_company ? ` · ${s.customer_company}` : ''}
+                        {' · '}<span style={{ color: 'var(--primary)', opacity: 0.8 }}>{CHANNEL_LABELS[s.interaction_type] ?? s.interaction_type}</span>
+                      </p>
+                      <p className="text-xs mt-1 italic" style={{ color: 'var(--muted-foreground)' }}>
+                        &ldquo;{s.commitment_text}&rdquo;
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[11px] font-medium rounded-full px-2 py-0.5" style={{ background: ps.bg, color: ps.text }}>
+                        {s.suggested_priority}
+                      </span>
+                      <Button
+                        onClick={() => createFollowUpFromSuggestion(s)}
+                        disabled={creatingFollowUpId === s.customer_id}
+                        className="h-7 rounded-lg text-[12px] font-medium px-3"
+                        style={{ background: 'var(--primary)', color: '#fff' }}
+                      >
+                        {creatingFollowUpId === s.customer_id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Criar'}
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {openCount === 0 && commitmentSuggestions.length === 0 && (
             <div className="rounded-xl p-8 text-center" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
               <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>Sem follow-ups abertos. 🎉</p>
             </div>
