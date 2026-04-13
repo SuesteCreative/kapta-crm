@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Building2, Plus, Search, Globe, Users, MailSearch, Loader2 } from 'lucide-react'
+import { Building2, Plus, Search, Globe, Users, MailSearch, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NewCompanyDialog } from '@/components/new-company-dialog'
@@ -25,6 +25,24 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
   const [search, setSearch] = useState('')
   const [showNew, setShowNew] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [cleaning, setCleaning] = useState(false)
+
+  async function handleCleanWithAI() {
+    setCleaning(true)
+    try {
+      const res = await fetch('/api/ai/clean-companies', { method: 'POST' })
+      const text = await res.text()
+      let json: { ok: boolean; removed?: number; renamed?: number; kept?: number; total?: number; error?: string }
+      try { json = JSON.parse(text) } catch { throw new Error('Servidor sem resposta.') }
+      if (!json.ok) throw new Error(json.error ?? 'Erro desconhecido')
+      toast.success(`${json.removed} removidas · ${json.renamed} renomeadas · ${json.kept} mantidas`)
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao organizar empresas.')
+    } finally {
+      setCleaning(false)
+    }
+  }
 
   async function handleEmailImport() {
     setImporting(true)
@@ -62,6 +80,16 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={handleCleanWithAI}
+            disabled={cleaning}
+            className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+          >
+            {cleaning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {cleaning ? 'A organizar…' : 'Organizar com IA'}
+          </Button>
           <Button
             variant="outline"
             onClick={handleEmailImport}

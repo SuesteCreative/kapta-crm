@@ -1,4 +1,10 @@
 {
+  "crons": [
+    {
+      "path": "/api/imap/sync",
+      "schedule": "0 7 * * *"
+    }
+  ],
   "functions": {
     "app/api/imap/sync/route.ts": {
       "maxDuration": 60
@@ -16,6 +22,24 @@
       "maxDuration": 60
     },
     "app/api/email/send-bulk/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/ai/detect-spam/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/ai/clean-companies/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/ai/suggest-ticket/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/ai/draft-reply/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/ai/summarize-email/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/ai/weekly-digest/route.ts": {
       "maxDuration": 60
     }
   }

@@ -2,10 +2,10 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Users, CalendarCheck, Ticket,
-  FileText, RefreshCw, ChevronRight, Loader2, Building2,
+  FileText, RefreshCw, ChevronRight, Loader2, Building2, Settings,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -16,6 +16,7 @@ const nav = [
   { href: '/follow-ups',  label: 'Follow-ups',  icon: CalendarCheck },
   { href: '/tickets',     label: 'Tickets',     icon: Ticket },
   { href: '/templates',   label: 'Templates',   icon: FileText },
+  { href: '/settings',    label: 'Definições',  icon: Settings },
 ]
 
 export function Sidebar() {
@@ -23,23 +24,36 @@ export function Sidebar() {
   const router = useRouter()
   const [syncing, setSyncing] = useState(false)
 
-  async function syncEmail() {
+  // Auto-sync on app open — but at most once every 10 minutes
+  useEffect(() => {
+    const INTERVAL_MS = 10 * 60 * 1000
+    const lastSync = Number(localStorage.getItem('lastEmailSync') ?? 0)
+    if (Date.now() - lastSync > INTERVAL_MS) {
+      syncEmail(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function syncEmail(silent = false) {
     setSyncing(true)
     try {
       const res = await fetch('/api/imap/sync')
       const data = await res.json()
+      localStorage.setItem('lastEmailSync', String(Date.now()))
       if (data.ok) {
-        toast.success(`Sync concluído — ${data.synced} importados`, {
-          description: data.skipped_duplicate > 0
-            ? `${data.skipped_duplicate} duplicados ignorados`
-            : undefined,
-        })
-        router.refresh()
+        if (!silent || data.synced > 0) {
+          toast.success(`Sync concluído — ${data.synced} importados`, {
+            description: data.skipped_duplicate > 0
+              ? `${data.skipped_duplicate} duplicados ignorados`
+              : undefined,
+          })
+        }
+        if (data.synced > 0) router.refresh()
       } else {
-        toast.error('Erro ao sincronizar email', { description: data.error })
+        if (!silent) toast.error('Erro ao sincronizar email', { description: data.error })
       }
     } catch (e) {
-      toast.error('Erro ao sincronizar email', { description: String(e) })
+      if (!silent) toast.error('Erro ao sincronizar email', { description: String(e) })
     } finally {
       setSyncing(false)
     }
@@ -122,7 +136,7 @@ export function Sidebar() {
         style={{ borderTop: '1px solid var(--sidebar-border)' }}
       >
         <button
-          onClick={syncEmail}
+          onClick={() => syncEmail()}
           disabled={syncing}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-all duration-150 disabled:opacity-50"
           style={{ color: 'var(--sidebar-muted)' }}

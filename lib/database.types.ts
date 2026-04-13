@@ -90,7 +90,7 @@ export interface Ticket {
 export interface Template {
   id: string
   name: string
-  type: 'email' | 'whatsapp' | 'note' | null
+  type: 'email' | 'whatsapp' | 'note' | 'signature' | null
   subject: string | null
   body: string
   created_at: string

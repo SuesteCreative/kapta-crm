@@ -25,6 +25,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'customer_id, to, subject, body required' }, { status: 400 })
   }
 
+  // Fetch signature and append if set
+  const supabaseForSig = createServiceClient()
+  const { data: sigRow } = await supabaseForSig
+    .from('templates')
+    .select('body')
+    .eq('type', 'signature')
+    .eq('name', '__signature__')
+    .maybeSingle()
+  const fullBody = sigRow?.body
+    ? `${body}\n\n--\n${sigRow.body}`
+    : body
+
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT ?? 465),
@@ -42,7 +54,7 @@ export async function POST(request: Request) {
       from: process.env.SMTP_USER,
       to,
       subject,
-      text: body,
+      text: fullBody,
     })
     messageId = info.messageId
   } catch (err) {
@@ -50,14 +62,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
   }
 
-  // Log sent email as outbound interaction
+  // Log sent email as outbound interaction (store full body with signature)
   const supabase = createServiceClient()
   await supabase.from('interactions').insert({
     customer_id,
     type: 'email',
     direction: 'outbound',
     subject,
-    content: body,
+    content: fullBody,
     source_id: messageId,
     occurred_at: new Date().toISOString(),
   })

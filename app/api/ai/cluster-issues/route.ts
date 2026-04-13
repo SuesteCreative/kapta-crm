@@ -91,7 +91,9 @@ export async function POST() {
     messages: [{ role: 'user', content: `Analisa estas mensagens e agrupa por problema comum:\n\n${itemsText}` }],
   })
 
-  const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
+  const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
+  const match = rawText.match(/\[[\s\S]*\]/)
+  const raw = match ? match[0] : '[]'
   let clusterResults: ClusterResult[] = []
   try {
     clusterResults = JSON.parse(raw)

@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Mail, MessageSquare, Video, Phone, FileText,
   Plus, ExternalLink, Heart, Building2, Tag,
   CheckCircle2, Circle, Pencil, ArrowLeft, ClipboardPaste,
+  Sparkles, Loader2, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -33,6 +34,23 @@ interface Props {
   tickets: Ticket[]
 }
 
+const TRUNCATE_LEN = 400
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&[a-z]+;/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 const CHANNEL_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
   email:    { icon: Mail,           color: '#3B82F6', bg: 'rgba(59,130,246,0.1)',  label: 'Email'    },
   whatsapp: { icon: MessageSquare,  color: '#2DB975', bg: 'rgba(45,185,117,0.1)', label: 'WhatsApp' },
@@ -50,6 +68,38 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
   const [showPasteConversation, setShowPasteConversation] = useState(false)
   const [showSendEmail,         setShowSendEmail]         = useState(false)
   const [bubblesUrl,            setBubblesUrl]            = useState<string | null>(null)
+  // Per-interaction: expand + AI bullets
+  const [expanded,   setExpanded]   = useState<Set<string>>(new Set())
+  const [summaries,  setSummaries]  = useState<Map<string, string[]>>(new Map())
+  const [summarizing, setSummarizing] = useState<Set<string>>(new Set())
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }, [])
+
+  const summarizeEmail = useCallback(async (id: string, content: string, subject: string | null) => {
+    setSummarizing((prev) => new Set([...prev, id]))
+    try {
+      const res = await fetch('/api/ai/summarize-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, subject }),
+      })
+      const text = await res.text()
+      let json: { ok: boolean; bullets?: string[]; error?: string }
+      try { json = JSON.parse(text) } catch { throw new Error('Servidor sem resposta.') }
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      setSummaries((prev) => new Map([...prev, [id, json.bullets ?? []]]))
+    } catch {
+      // silent fail — user can retry
+    } finally {
+      setSummarizing((prev) => { const n = new Set(prev); n.delete(id); return n })
+    }
+  }, [])
 
   const openFollowUps = followUps.filter((f) => f.status === 'open')
   const doneFollowUps = followUps.filter((f) => f.status === 'done')
@@ -187,6 +237,67 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
 
         {/* TIMELINE */}
         <TabsContent value="timeline" className="mt-5 space-y-3">
+          {/* Context summary strip */}
+          {interactions.length > 0 && (() => {
+            const lastInteraction = interactions[0]
+            const lastInbound = interactions.find((i) => i.direction === 'inbound')
+            const openTicketsCount = tickets.filter((t) => t.status === 'open' || t.status === 'in-progress').length
+            const openFUCount = openFollowUps.length
+            const daysSinceLast = lastInteraction
+              ? Math.floor((Date.now() - new Date(lastInteraction.occurred_at).getTime()) / 86_400_000)
+              : null
+            const daysSinceInbound = lastInbound
+              ? Math.floor((Date.now() - new Date(lastInbound.occurred_at).getTime()) / 86_400_000)
+              : null
+
+            const urgentColor = (daysSinceInbound ?? 0) >= 7 ? '#EF4444' : (daysSinceInbound ?? 0) >= 3 ? '#F59E0B' : '#2DB975'
+
+            return (
+              <div
+                className="flex flex-wrap gap-4 rounded-xl px-4 py-3 text-[12.5px]"
+                style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+              >
+                {daysSinceLast !== null && (
+                  <div className="flex items-center gap-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                    <span className="font-medium" style={{ color: 'var(--foreground)' }}>
+                      {daysSinceLast === 0 ? 'hoje' : `há ${daysSinceLast}d`}
+                    </span>
+                    último contacto
+                    <span style={{ color: CHANNEL_CONFIG[lastInteraction.type]?.color ?? 'var(--muted-foreground)' }}>
+                      ({CHANNEL_CONFIG[lastInteraction.type]?.label ?? lastInteraction.type})
+                    </span>
+                  </div>
+                )}
+                {daysSinceInbound !== null && (
+                  <div className="flex items-center gap-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                    <span className="font-medium" style={{ color: urgentColor }}>
+                      {daysSinceInbound === 0 ? 'hoje' : `há ${daysSinceInbound}d`}
+                    </span>
+                    último inbound
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                  <span className="font-medium" style={{ color: openFUCount > 0 ? '#F59E0B' : 'var(--muted-foreground)' }}>
+                    {openFUCount}
+                  </span>
+                  follow-up{openFUCount !== 1 ? 's' : ''} aberto{openFUCount !== 1 ? 's' : ''}
+                </div>
+                <div className="flex items-center gap-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                  <span className="font-medium" style={{ color: openTicketsCount > 0 ? '#EF4444' : 'var(--muted-foreground)' }}>
+                    {openTicketsCount}
+                  </span>
+                  ticket{openTicketsCount !== 1 ? 's' : ''} aberto{openTicketsCount !== 1 ? 's' : ''}
+                </div>
+                <div className="flex items-center gap-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                  <span className="font-medium" style={{ color: 'var(--foreground)' }}>
+                    {interactions.length}
+                  </span>
+                  interações no total
+                </div>
+              </div>
+            )
+          })()}
+
           {interactions.length === 0 && (
             <EmptyState message="Sem interações registadas. Adiciona a primeira." />
           )}
@@ -239,14 +350,65 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                     </span>
                   </div>
 
-                  {i.content && (
-                    <p
-                      className="text-sm leading-relaxed whitespace-pre-wrap"
-                      style={{ color: 'var(--muted-foreground)' }}
-                    >
-                      {i.content}
-                    </p>
-                  )}
+                  {i.content && (() => {
+                    const isEmail = i.type === 'email'
+                    const cleaned = isEmail ? stripHtml(i.content) : i.content
+                    const isLong = cleaned.length > TRUNCATE_LEN
+                    const isExpanded = expanded.has(i.id)
+                    const displayText = isLong && !isExpanded ? cleaned.slice(0, TRUNCATE_LEN) + '…' : cleaned
+                    const bullets = summaries.get(i.id)
+                    const isSummarizing = summarizing.has(i.id)
+
+                    return (
+                      <div className="space-y-2">
+                        {/* AI bullets */}
+                        {bullets && bullets.length > 0 && (
+                          <ul className="space-y-1 rounded-lg p-3" style={{ background: 'rgba(91,91,214,0.06)', border: '1px solid rgba(91,91,214,0.15)' }}>
+                            {bullets.map((b, bi) => (
+                              <li key={bi} className="flex items-start gap-2 text-[12.5px]" style={{ color: 'var(--foreground)' }}>
+                                <span className="mt-[3px] w-1.5 h-1.5 rounded-full shrink-0" style={{ background: 'var(--primary)' }} />
+                                {b}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        <p
+                          className="text-sm leading-relaxed whitespace-pre-wrap"
+                          style={{ color: 'var(--muted-foreground)' }}
+                        >
+                          {displayText}
+                        </p>
+
+                        {/* Expand / AI button row */}
+                        <div className="flex items-center gap-2">
+                          {isLong && (
+                            <button
+                              onClick={() => toggleExpand(i.id)}
+                              className="flex items-center gap-1 text-[11px] font-medium transition-opacity hover:opacity-70"
+                              style={{ color: 'var(--primary)' }}
+                            >
+                              {isExpanded
+                                ? <><ChevronUp className="h-3 w-3" /> Ver menos</>
+                                : <><ChevronDown className="h-3 w-3" /> Ver mais</>}
+                            </button>
+                          )}
+                          {isEmail && !bullets && (
+                            <button
+                              onClick={() => summarizeEmail(i.id, i.content!, i.subject)}
+                              disabled={isSummarizing}
+                              className="flex items-center gap-1 text-[11px] font-medium transition-opacity hover:opacity-70"
+                              style={{ color: 'var(--muted-foreground)' }}
+                            >
+                              {isSummarizing
+                                ? <><Loader2 className="h-3 w-3 animate-spin" /> A resumir…</>
+                                : <><Sparkles className="h-3 w-3" /> Resumir</>}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
 
                   {/* Bubbles embed */}
                   {i.bubbles_url && (
@@ -365,7 +527,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
       {/* Modals */}
       <AddInteractionDialog    open={showAddInteraction}    customerId={customer.id} onClose={() => { setShowAddInteraction(false);    refresh() }} />
       <AddFollowUpDialog       open={showAddFollowUp}       customerId={customer.id} onClose={() => { setShowAddFollowUp(false);       refresh() }} />
-      <TicketBuilderDialog     open={showTicketBuilder}     customer={customer}      onClose={() => { setShowTicketBuilder(false);     refresh() }} />
+      <TicketBuilderDialog     open={showTicketBuilder}     customer={customer}     interactions={interactions}     onClose={() => { setShowTicketBuilder(false);     refresh() }} />
       <EditCustomerDialog      open={showEditCustomer}      customer={customer}      onClose={() => { setShowEditCustomer(false);      refresh() }} />
       <PasteConversationDialog open={showPasteConversation} customerId={customer.id} onClose={() => { setShowPasteConversation(false); refresh() }} />
       <SendEmailDialog
@@ -374,6 +536,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
         customerEmail={customer.customer_identifiers.find((i) => i.type === 'email')?.value ?? ''}
         customerName={customer.name}
         customerCompany={customer.company}
+        interactions={interactions}
         onClose={() => { setShowSendEmail(false); refresh() }}
       />
       <BubblesVideoModal url={bubblesUrl} onClose={() => setBubblesUrl(null)} />

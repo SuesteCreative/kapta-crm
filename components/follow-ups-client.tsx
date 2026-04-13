@@ -3,12 +3,13 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { CheckCircle2, Circle, AlertTriangle, Clock, CalendarDays, Sparkles, Loader2 } from 'lucide-react'
+import { CheckCircle2, Circle, AlertTriangle, Clock, CalendarDays, Sparkles, Loader2, X, ShieldAlert, Mail } from 'lucide-react'
 import { cn, dueDateLabel, PRIORITY_STYLES } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import type { FollowUp } from '@/lib/database.types'
+import type { FollowUp, Interaction } from '@/lib/database.types'
+import { SendEmailDialog } from '@/components/send-email-dialog'
 
 type FollowUpWithCustomer = FollowUp & { customers: { id: string; name: string; company: string | null } | null }
 
@@ -30,18 +31,30 @@ const CHANNEL_LABELS: Record<string, string> = {
   note: '📝 nota',
 }
 
+type CustomerInInteraction = {
+  id: string
+  name: string
+  company: string | null
+  company_id: string | null
+  customer_identifiers?: { value: string; type: string; is_primary: boolean }[]
+}
+
 type EmailInteraction = {
+  id: string
   customer_id: string
   direction: string | null
   subject: string | null
   occurred_at: string
-  customers: { id: string; name: string; company: string | null; company_id: string | null } | { id: string; name: string; company: string | null; company_id: string | null }[] | null
+  metadata: Record<string, unknown> | null
+  customers: CustomerInInteraction | CustomerInInteraction[] | null
 }
 
 type NeedsReplyEntry = {
   customerId: string
+  interactionId: string
   name: string
   company: string | null
+  email: string | null
   subject: string | null
   occurred_at: string
   daysWaiting: number
@@ -75,10 +88,17 @@ const PRIORITY_COLORS: Record<string, string> = {
   low: '#6B7280',
 }
 
-function resolveCustomer(raw: EmailInteraction['customers']): { id: string; name: string; company: string | null } | null {
+function resolveCustomer(raw: EmailInteraction['customers']): CustomerInInteraction | null {
   if (!raw) return null
   if (Array.isArray(raw)) return raw[0] ?? null
   return raw
+}
+
+function primaryEmail(c: CustomerInInteraction | null): string | null {
+  if (!c?.customer_identifiers) return null
+  const primary = c.customer_identifiers.find((ci) => ci.type === 'email' && ci.is_primary)
+  const any = c.customer_identifiers.find((ci) => ci.type === 'email')
+  return primary?.value ?? any?.value ?? null
 }
 
 export function FollowUpsClient({
@@ -92,10 +112,21 @@ export function FollowUpsClient({
   const params = useSearchParams()
   const [tab, setTab] = useState(params.get('filter') ?? 'reply')
   const [triaging, setTriaging] = useState(false)
-  const [triageMap, setTriageMap] = useState<Map<string, TriageResult>>(new Map())
+  // Pre-populate triage from metadata already stored in DB — no button click needed
+  const [triageMap, setTriageMap] = useState<Map<string, TriageResult>>(() => {
+    const map = new Map<string, TriageResult>()
+    for (const ei of emailInteractions) {
+      const triage = ei.metadata?.ai_triage as TriageResult | undefined
+      if (triage) map.set(ei.customer_id, triage)
+    }
+    return map
+  })
   const [detectingCommitments, setDetectingCommitments] = useState(false)
   const [commitmentSuggestions, setCommitmentSuggestions] = useState<CommitmentSuggestion[]>([])
   const [creatingFollowUpId, setCreatingFollowUpId] = useState<string | null>(null)
+  const [filteringSpam, setFilteringSpam] = useState(false)
+  const [spamIds, setSpamIds] = useState<Set<string>>(new Set()) // interaction IDs marked spam this session
+  const [replyTarget, setReplyTarget] = useState<NeedsReplyEntry | null>(null)
 
   const today = new Date().toISOString().split('T')[0]
   const overdue    = followUps.filter((f) => f.status === 'open' && f.due_date && f.due_date < today)
@@ -114,10 +145,12 @@ export function FollowUpsClient({
     const entries: NeedsReplyEntry[] = []
     for (const [customerId, ei] of byCustomer) {
       if (ei.direction !== 'inbound') continue
+      if (ei.metadata?.is_spam === true || spamIds.has(ei.id)) continue
       const customer = resolveCustomer(ei.customers)
       if (!customer) continue
       const daysWaiting = Math.floor((now - new Date(ei.occurred_at).getTime()) / 86_400_000)
-      entries.push({ customerId, name: customer.name, company: customer.company, subject: ei.subject, occurred_at: ei.occurred_at, daysWaiting })
+      const email = primaryEmail(customer)
+      entries.push({ customerId, interactionId: ei.id, name: customer.name, company: customer.company, email, subject: ei.subject, occurred_at: ei.occurred_at, daysWaiting })
     }
     // If triage available, sort by AI priority; otherwise by days waiting
     if (triageMap.size > 0) {
@@ -128,18 +161,69 @@ export function FollowUpsClient({
       })
     }
     return entries.sort((a, b) => b.daysWaiting - a.daysWaiting)
-  }, [emailInteractions, triageMap])
+  }, [emailInteractions, triageMap, spamIds])
+
+  async function markSpam(interactionId: string) {
+    setSpamIds((prev) => new Set([...prev, interactionId]))
+    await supabase
+      .from('interactions')
+      .update({ metadata: { is_spam: true } })
+      .eq('id', interactionId)
+  }
+
+  async function filterSpamWithAI() {
+    if (needsReply.length === 0) return
+    setFilteringSpam(true)
+    try {
+      // Build batch for Claude: include customer_id so API can look up real email address
+      const batch = needsReply.map((e) => ({
+        interaction_id: e.interactionId,
+        customer_id: e.customerId,
+        from_name: e.name,
+        company: e.company,
+        subject: e.subject ?? '(sem assunto)',
+      }))
+      const res = await fetch('/api/ai/detect-spam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails: batch }),
+      })
+      const text = await res.text()
+      let json: { ok: boolean; spam_ids?: string[]; error?: string }
+      try { json = JSON.parse(text) } catch { throw new Error('Servidor sem resposta — tente novamente.') }
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      const spamInteractionIds: string[] = json.spam_ids ?? []
+      if (spamInteractionIds.length === 0) {
+        toast.success('Nenhum spam detetado.')
+        return
+      }
+      // Mark all in DB and session state
+      setSpamIds((prev) => new Set([...prev, ...spamInteractionIds]))
+      await Promise.all(
+        spamInteractionIds.map((id) =>
+          supabase.from('interactions').update({ metadata: { is_spam: true } }).eq('id', id)
+        )
+      )
+      toast.success(`${spamInteractionIds.length} email(s) de spam removidos.`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao filtrar spam.')
+    } finally {
+      setFilteringSpam(false)
+    }
+  }
 
   async function runTriage() {
     setTriaging(true)
     try {
       const res = await fetch('/api/ai/triage-inbox', { method: 'POST' })
-      const json = await res.json()
+      const text = await res.text()
+      let json: { ok: boolean; results?: TriageResult[]; error?: string; total?: number }
+      try { json = JSON.parse(text) } catch { throw new Error('Servidor sem resposta — tente novamente.') }
       if (!json.ok) throw new Error(json.error ?? 'Erro')
       const map = new Map<string, TriageResult>()
-      for (const r of json.results as TriageResult[]) map.set(r.customer_id, r)
+      for (const r of json.results ?? []) map.set(r.customer_id, r)
       setTriageMap(map)
-      toast.success(`${json.results.length} emails analisados por IA`)
+      toast.success(`${(json.results ?? []).length} emails analisados por IA`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao analisar emails.')
     } finally {
@@ -217,15 +301,27 @@ export function FollowUpsClient({
           </p>
         </div>
         {tab === 'reply' && (
-          <Button
-            onClick={runTriage}
-            disabled={triaging || needsReply.length === 0}
-            className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
-            style={{ background: 'var(--primary)', color: '#fff' }}
-          >
-            {triaging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            {triaging ? 'A analisar…' : 'Analisar com IA'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={filterSpamWithAI}
+              disabled={filteringSpam || needsReply.length === 0}
+              variant="outline"
+              className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+            >
+              {filteringSpam ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldAlert className="h-3.5 w-3.5" />}
+              {filteringSpam ? 'A filtrar…' : 'Filtrar spam'}
+            </Button>
+            <Button
+              onClick={runTriage}
+              disabled={triaging || needsReply.length === 0}
+              className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+              style={{ background: 'var(--primary)', color: '#fff' }}
+            >
+              {triaging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {triaging ? 'A analisar…' : 'Analisar com IA'}
+            </Button>
+          </div>
         )}
         {tab === 'open' && (
           <Button
@@ -274,71 +370,93 @@ export function FollowUpsClient({
                 : entry.daysWaiting >= 7 ? '#EF4444' : entry.daysWaiting >= 3 ? '#F59E0B' : '#2DB975'
 
               return (
-                <Link
-                  key={entry.customerId}
-                  href={`/customers/${entry.customerId}`}
-                  className="flex items-start gap-3 rounded-xl p-4 transition-opacity hover:opacity-80"
-                  style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', display: 'flex' }}
-                >
-                  <div className="mt-1.5 w-2 h-2 rounded-full shrink-0" style={{ background: dotColor }} />
+                <div key={entry.customerId} className="relative">
+                  <Link
+                    href={`/customers/${entry.customerId}`}
+                    className="flex items-start gap-3 rounded-xl p-4 pr-24 transition-opacity hover:opacity-80"
+                    style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', display: 'flex' }}
+                  >
+                    <div className="mt-1.5 w-2 h-2 rounded-full shrink-0" style={{ background: dotColor }} />
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
-                        {entry.name}
-                      </p>
-                      {entry.company && (
-                        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{entry.company}</span>
-                      )}
-                      {triage && (
-                        <span
-                          className="text-[10px] font-semibold uppercase rounded-full px-1.5 py-0.5"
-                          style={{ background: `${CATEGORY_COLORS[triage.category] ?? '#6B7280'}20`, color: CATEGORY_COLORS[triage.category] ?? '#6B7280' }}
-                        >
-                          {triage.category}
-                        </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+                          {entry.name}
+                        </p>
+                        {entry.company && (
+                          <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{entry.company}</span>
+                        )}
+                        {triage && (
+                          <span
+                            className="text-[10px] font-semibold uppercase rounded-full px-1.5 py-0.5"
+                            style={{ background: `${CATEGORY_COLORS[triage.category] ?? '#6B7280'}20`, color: CATEGORY_COLORS[triage.category] ?? '#6B7280' }}
+                          >
+                            {triage.category}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* AI summary takes priority over subject */}
+                      {triage ? (
+                        <>
+                          <p className="text-xs mt-0.5" style={{ color: 'var(--foreground)', opacity: 0.8 }}>
+                            {triage.summary}
+                          </p>
+                          <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--primary)' }}>
+                            <Sparkles className="h-3 w-3" /> {triage.action}
+                          </p>
+                        </>
+                      ) : (
+                        entry.subject && (
+                          <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted-foreground)' }}>
+                            {entry.subject}
+                          </p>
+                        )
                       )}
                     </div>
 
-                    {/* AI summary takes priority over subject */}
-                    {triage ? (
-                      <>
-                        <p className="text-xs mt-0.5" style={{ color: 'var(--foreground)', opacity: 0.8 }}>
-                          {triage.summary}
-                        </p>
-                        <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--primary)' }}>
-                          <Sparkles className="h-3 w-3" /> {triage.action}
-                        </p>
-                      </>
-                    ) : (
-                      entry.subject && (
-                        <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted-foreground)' }}>
-                          {entry.subject}
-                        </p>
-                      )
-                    )}
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    {triage && (
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      {triage && (
+                        <span
+                          className="text-[10px] font-semibold uppercase rounded-full px-2 py-0.5"
+                          style={{ background: `${PRIORITY_COLORS[triage.priority]}20`, color: PRIORITY_COLORS[triage.priority] }}
+                        >
+                          {triage.priority}
+                        </span>
+                      )}
                       <span
-                        className="text-[10px] font-semibold uppercase rounded-full px-2 py-0.5"
-                        style={{ background: `${PRIORITY_COLORS[triage.priority]}20`, color: PRIORITY_COLORS[triage.priority] }}
+                        className="text-[11px] font-medium rounded-full px-2 py-0.5"
+                        style={{
+                          background: entry.daysWaiting >= 7 ? 'rgba(239,68,68,0.1)' : entry.daysWaiting >= 3 ? 'rgba(245,158,11,0.1)' : 'rgba(45,185,117,0.1)',
+                          color: entry.daysWaiting >= 7 ? '#EF4444' : entry.daysWaiting >= 3 ? '#F59E0B' : '#2DB975',
+                        }}
                       >
-                        {triage.priority}
+                        {entry.daysWaiting === 0 ? 'hoje' : `${entry.daysWaiting}d`}
                       </span>
+                    </div>
+                  </Link>
+                  {/* Action buttons: reply + dismiss */}
+                  <div className="absolute top-2 right-2 flex items-center gap-1">
+                    {entry.email && (
+                      <button
+                        onClick={(e) => { e.preventDefault(); setReplyTarget(entry) }}
+                        className="h-6 px-2 flex items-center gap-1 rounded-md text-[11px] font-medium transition-colors hover:opacity-80"
+                        style={{ background: 'rgba(91,91,214,0.12)', color: 'var(--primary)' }}
+                        title="Responder"
+                      >
+                        <Mail className="h-3 w-3" /> Responder
+                      </button>
                     )}
-                    <span
-                      className="text-[11px] font-medium rounded-full px-2 py-0.5"
-                      style={{
-                        background: entry.daysWaiting >= 7 ? 'rgba(239,68,68,0.1)' : entry.daysWaiting >= 3 ? 'rgba(245,158,11,0.1)' : 'rgba(45,185,117,0.1)',
-                        color: entry.daysWaiting >= 7 ? '#EF4444' : entry.daysWaiting >= 3 ? '#F59E0B' : '#2DB975',
-                      }}
+                    <button
+                      onClick={() => markSpam(entry.interactionId)}
+                      className="h-6 w-6 flex items-center justify-center rounded-md transition-colors hover:opacity-70"
+                      style={{ color: 'var(--muted-foreground)' }}
+                      title="Marcar como spam"
                     >
-                      {entry.daysWaiting === 0 ? 'hoje' : `${entry.daysWaiting}d`}
-                    </span>
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                </Link>
+                </div>
               )
             })
           )}
@@ -418,6 +536,34 @@ export function FollowUpsClient({
           )}
           {done.map((f) => <FollowUpItem key={f.id} f={f} onToggle={toggle} />)}
         </div>
+      )}
+
+      {/* Quick-reply dialog */}
+      {replyTarget && (
+        <SendEmailDialog
+          open={true}
+          customerId={replyTarget.customerId}
+          customerEmail={replyTarget.email ?? ''}
+          customerName={replyTarget.name}
+          customerCompany={replyTarget.company}
+          interactions={emailInteractions
+            .filter((ei) => ei.customer_id === replyTarget.customerId)
+            .map((ei) => ({
+              id: ei.id,
+              customer_id: ei.customer_id,
+              type: 'email' as const,
+              direction: ei.direction as Interaction['direction'],
+              subject: ei.subject,
+              content: null,
+              source_id: null,
+              bubbles_url: null,
+              bubbles_title: null,
+              metadata: ei.metadata,
+              occurred_at: ei.occurred_at,
+              created_at: ei.occurred_at,
+            }))}
+          onClose={() => setReplyTarget(null)}
+        />
       )}
     </div>
   )

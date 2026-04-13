@@ -14,7 +14,7 @@ export default async function FollowUpsPage() {
   // Last 500 email interactions — client will deduplicate per customer and filter inbound-last
   const { data: emailInteractions } = await supabase
     .from('interactions')
-    .select('customer_id, direction, subject, occurred_at, customers(id, name, company, company_id)')
+    .select('id, customer_id, direction, subject, occurred_at, metadata, customers(id, name, company, company_id, customer_identifiers(value, type, is_primary))')
     .eq('type', 'email')
     .order('occurred_at', { ascending: false })
     .limit(500)
