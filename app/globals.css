@@ -54,7 +54,12 @@
   --priority-low:     #A0AEC0;
   --priority-medium:  #3B82F6;
   --priority-high:    #F97316;
-  --priority-urgent:  #E5484D;
+  --priority-urgent:  #EF4444;
+
+  /* Interaction channel colors */
+  --interaction-email:   #3B82F6;
+  --interaction-meeting: #8B5CF6;
+  --interaction-note:    #9CA3AF;
 
   /* Misc */
   --radius:           0.5rem;
@@ -151,6 +156,10 @@ body {
 
 /* Page transition */
 main > * { animation: fadeIn 220ms ease forwards; }
+
+/* Row hover — use as className instead of inline onMouseEnter/Leave */
+.row-hover { transition: background 120ms ease; }
+.row-hover:hover { background: var(--muted) !important; }
 
 /* Card hover lift */
 .card-hover {

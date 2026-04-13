@@ -283,7 +283,7 @@ export function OnboardingDialog({ open, customerId, customerName, customerEmail
                 onClick={startOnboarding}
                 disabled={loading}
                 className="text-xs h-8 gap-1.5"
-                style={{ background: 'var(--primary)', color: '#fff' }}
+                style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
               >
                 {loading && <Loader2 className="h-3 w-3 animate-spin" />}
                 <CheckSquare className="h-3 w-3" /> Iniciar
@@ -297,7 +297,7 @@ export function OnboardingDialog({ open, customerId, customerName, customerEmail
                 onClick={startOnboarding}
                 disabled={loading}
                 className="text-xs h-8 gap-1.5"
-                style={{ background: 'var(--primary)', color: '#fff' }}
+                style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
               >
                 {loading && <Loader2 className="h-3 w-3 animate-spin" />}
                 <Mail className="h-3 w-3" /> Confirmar e iniciar

@@ -75,7 +75,7 @@ export function EditCompanyDialog({ open, company, onClose }: Props) {
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
-            <Button type="submit" disabled={loading} style={{ background: 'var(--primary)', color: '#fff' }}>
+            <Button type="submit" disabled={loading} style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>
               {loading ? 'A guardar…' : 'Guardar alterações'}
             </Button>
           </DialogFooter>

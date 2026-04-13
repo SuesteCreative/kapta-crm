@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Mail, MessageSquare, Video, Phone, FileText,
+  Mail, MessageSquare, Video,
   Plus, ExternalLink, Heart, Building2, Tag,
   CheckCircle2, Circle, Pencil, ArrowLeft, ClipboardPaste,
   Sparkles, Loader2, ChevronDown, ChevronUp, RefreshCw, Trash2,
@@ -13,8 +13,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import {
   cn, STATUS_STYLES, STATUS_LABELS, PRIORITY_STYLES,
-  HEALTH_COLORS, formatDateTime, dueDateLabel,
+  HEALTH_COLORS, URGENCY_STYLES, formatDateTime, dueDateLabel,
 } from '@/lib/utils'
+import { CHANNEL_CONFIG } from '@/lib/channel-config'
 import type { CustomerWithIdentifiers, Interaction, FollowUp, Ticket } from '@/lib/database.types'
 import { AddInteractionDialog } from '@/components/add-interaction-dialog'
 import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
@@ -83,13 +84,6 @@ function groupTimeline(interactions: Interaction[]): ThreadItem[] {
   return result
 }
 
-const CHANNEL_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
-  email:    { icon: Mail,           color: '#3B82F6', bg: 'rgba(59,130,246,0.1)',  label: 'Email'    },
-  whatsapp: { icon: MessageSquare,  color: '#2DB975', bg: 'rgba(45,185,117,0.1)', label: 'WhatsApp' },
-  meeting:  { icon: Video,          color: '#8B5CF6', bg: 'rgba(139,92,246,0.1)', label: 'Reunião'  },
-  call:     { icon: Phone,          color: '#F97316', bg: 'rgba(249,115,22,0.1)', label: 'Chamada'  },
-  note:     { icon: FileText,       color: '#9CA3AF', bg: 'rgba(156,163,175,0.1)',label: 'Nota'     },
-}
 
 export function CustomerDetailClient({ customer, interactions, followUps, tickets }: Props) {
   const router = useRouter()
@@ -312,7 +306,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
               size="sm"
               onClick={() => setShowTicketBuilder(true)}
               className="h-8 gap-1.5 rounded-lg text-[12.5px] font-medium"
-              style={{ background: 'var(--primary)', color: '#fff' }}
+              style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
             >
               <Plus className="h-3.5 w-3.5" /> Ticket
             </Button>
@@ -335,12 +329,6 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
 
       {/* AI Situation Summary */}
       {(() => {
-        const URGENCY_STYLES = {
-          critical: { border: '#E5484D', bg: 'rgba(229,72,77,0.07)', dot: '#E5484D', label: 'Crítico' },
-          high:     { border: '#F59E0B', bg: 'rgba(245,158,11,0.07)', dot: '#F59E0B', label: 'Urgente' },
-          normal:   { border: 'var(--border)', bg: 'rgba(91,91,214,0.05)', dot: 'var(--primary)', label: '' },
-          good:     { border: '#2DB975', bg: 'rgba(45,185,117,0.06)', dot: '#2DB975', label: '' },
-        }
         const style = aiSummary ? URGENCY_STYLES[aiSummary.urgency] : URGENCY_STYLES.normal
 
         return (

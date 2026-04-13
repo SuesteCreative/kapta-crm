@@ -283,7 +283,7 @@ export function PasteConversationDialog({ open, customerId, onClose }: Props) {
           <Button
             onClick={handleImport}
             disabled={mapped.length === 0 || loading}
-            style={{ background: 'var(--primary)', color: '#fff' }}
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
             {loading ? 'A importar…' : `Importar ${mapped.length > 0 ? mapped.length : ''} mensagens`}
           </Button>

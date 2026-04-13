@@ -105,7 +105,7 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
           <Button
             onClick={() => setShowNew(true)}
             className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
-            style={{ background: 'var(--primary)', color: '#fff' }}
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
             <Plus className="h-3.5 w-3.5" /> Nova empresa
           </Button>

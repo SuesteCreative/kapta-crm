@@ -153,7 +153,7 @@ export function SettingsClient({ initialSignature }: Props) {
           onClick={handleSave}
           disabled={saving}
           className="gap-2 rounded-lg text-[13px] font-medium"
-          style={{ background: 'var(--primary)', color: '#fff' }}
+          style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
         >
           <Save className="h-3.5 w-3.5" />
           {saving ? 'A guardar…' : 'Guardar assinatura'}

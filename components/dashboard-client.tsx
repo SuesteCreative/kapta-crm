@@ -199,7 +199,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
       )}
 
       {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1rem' }}>
         {KPI_CONFIG.map(({ key, label, icon: Icon, color, bg, borderColor, href }, i) => (
           <Link key={key} href={href}
             className={`card-hover stagger-${i + 1} animate-fade-in`}
@@ -239,7 +239,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
               }}>
                 <span className="status-dot" style={{ background: style.dot }} />
                 {STATUS_LABELS[s]}
-                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 22, height: 22, borderRadius: 999, background: style.dot, color: '#fff', fontSize: '0.6875rem', fontWeight: 700, lineHeight: 1 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 22, height: 22, borderRadius: 999, background: style.dot, color: 'var(--primary-foreground)', fontSize: '0.6875rem', fontWeight: 700, lineHeight: 1 }}>
                   {count}
                 </span>
               </Link>
@@ -249,7 +249,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
       </div>
 
       {/* Main two-column grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: '1.25rem', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))', gap: '1.25rem', alignItems: 'start' }}>
 
         {/* Left: Follow-ups */}
         <div style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', borderRadius: 14, overflow: 'hidden' }}>
@@ -285,8 +285,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
                       borderLeft: `3px solid ${leftBorderColor}`, textDecoration: 'none',
                       transition: 'background 120ms', background: 'transparent',
                     }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--muted)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    className="row-hover"
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--foreground)', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -341,8 +340,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
                       borderBottom: idx < emailActions.length - 1 ? '1px solid var(--border)' : 'none',
                       textDecoration: 'none', transition: 'background 120ms', background: 'transparent',
                     }}
-                    onMouseEnter={ev => (ev.currentTarget.style.background = 'var(--muted)')}
-                    onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}
+                    className="row-hover"
                   >
                     {/* Priority dot */}
                     <div style={{ marginTop: 5, width: 8, height: 8, borderRadius: '50%', background: prio?.dot ?? 'var(--muted-foreground)', flexShrink: 0 }} />

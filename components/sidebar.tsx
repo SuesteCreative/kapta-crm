@@ -138,10 +138,8 @@ export function Sidebar() {
         <button
           onClick={() => syncEmail()}
           disabled={syncing}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-all duration-150 disabled:opacity-50"
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-all duration-150 disabled:opacity-50 hover:opacity-80"
           style={{ color: 'var(--sidebar-muted)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--sidebar-text)')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--sidebar-muted)')}
         >
           {syncing
             ? <Loader2 className="h-[14px] w-[14px] shrink-0 animate-spin" />
@@ -156,7 +154,7 @@ export function Sidebar() {
           <p className="text-[11px] font-medium" style={{ color: 'var(--sidebar-muted)' }}>
             Pedro
           </p>
-          <p className="text-[10px] truncate mt-0.5" style={{ color: '#3A3D4D' }}>
+          <p className="text-[10px] truncate mt-0.5" style={{ color: 'var(--sidebar-muted)' }}>
             pedro@kapta.pt
           </p>
         </div>

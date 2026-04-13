@@ -242,7 +242,7 @@ export function SendEmailDialog({ open, customerId, customerEmail, customerName,
           <Button
             onClick={handleSend}
             disabled={loading || drafting || !to || !subject || !body}
-            style={{ background: 'var(--primary)', color: '#fff' }}
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
             {loading ? 'A enviar…' : 'Enviar email'}
           </Button>

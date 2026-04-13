@@ -178,7 +178,7 @@ export function ResolutionEmailDialog({
             onClick={handleSend}
             disabled={sending || drafting || !to}
             className="text-xs h-8 gap-1.5"
-            style={{ background: 'var(--primary)', color: '#fff' }}
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
             {sending && <Loader2 className="h-3 w-3 animate-spin" />}
             Enviar email

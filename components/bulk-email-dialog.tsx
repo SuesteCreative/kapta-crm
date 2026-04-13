@@ -166,7 +166,7 @@ export function BulkEmailDialog({ open, cluster, onClose }: Props) {
           <Button
             onClick={handleSend}
             disabled={loading || !subject.trim() || !body.trim()}
-            style={{ background: 'var(--primary)', color: '#fff' }}
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
             {loading
               ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />A enviar…</>

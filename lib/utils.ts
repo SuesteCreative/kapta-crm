@@ -68,6 +68,14 @@ export const PRIORITY_COLORS: Record<string, string> = {
   urgent: 'bg-red-100 text-red-700',
 }
 
+// AI urgency panel styles — shared between customer-detail and company-detail
+export const URGENCY_STYLES: Record<string, { border: string; bg: string; dot: string; label: string }> = {
+  critical: { border: 'var(--destructive)',  bg: 'rgba(229,72,77,0.07)',   dot: 'var(--destructive)', label: 'Crítico' },
+  high:     { border: '#F59E0B',             bg: 'rgba(245,158,11,0.07)', dot: '#F59E0B',             label: 'Urgente' },
+  normal:   { border: 'var(--border)',       bg: 'rgba(91,91,214,0.05)',  dot: 'var(--primary)',      label: ''        },
+  good:     { border: 'var(--status-active)',bg: 'rgba(45,185,117,0.06)', dot: 'var(--status-active)',label: ''        },
+}
+
 export const HEALTH_COLORS: Record<number, string> = {
   1: 'text-red-500',
   2: 'text-orange-400',

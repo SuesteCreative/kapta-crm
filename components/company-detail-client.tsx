@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   Building2, Globe, ArrowLeft, Pencil,
-  Mail, MessageSquare, Video, Phone, FileText,
+  Mail,
   Heart, Users, ExternalLink, Plus, Sparkles,
   Loader2, RefreshCw, MessageCircle, AlertTriangle,
   CheckCircle2, Clock,
@@ -16,7 +16,8 @@ import { EditCompanyDialog } from '@/components/edit-company-dialog'
 import { AddInteractionDialog } from '@/components/add-interaction-dialog'
 import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
 import { SendEmailDialog } from '@/components/send-email-dialog'
-import { cn, STATUS_STYLES, STATUS_LABELS, HEALTH_COLORS, formatDateTime, formatDate } from '@/lib/utils'
+import { cn, STATUS_STYLES, STATUS_LABELS, HEALTH_COLORS, URGENCY_STYLES, formatDateTime, formatDate } from '@/lib/utils'
+import { CHANNEL_CONFIG } from '@/lib/channel-config'
 import { toast } from 'sonner'
 import type { Company, CustomerWithIdentifiers, Interaction } from '@/lib/database.types'
 
@@ -39,20 +40,6 @@ function cleanContent(raw: string): string {
     .trim()
 }
 
-const CHANNEL_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
-  email:    { icon: Mail,          color: '#3B82F6', bg: 'rgba(59,130,246,0.1)',  label: 'Email'    },
-  whatsapp: { icon: MessageSquare, color: '#2DB975', bg: 'rgba(45,185,117,0.1)', label: 'WhatsApp' },
-  meeting:  { icon: Video,         color: '#8B5CF6', bg: 'rgba(139,92,246,0.1)', label: 'Reunião'  },
-  call:     { icon: Phone,         color: '#F97316', bg: 'rgba(249,115,22,0.1)', label: 'Chamada'  },
-  note:     { icon: FileText,      color: '#9CA3AF', bg: 'rgba(156,163,175,0.1)',label: 'Nota'     },
-}
-
-const URGENCY_STYLES = {
-  critical: { border: '#EF4444', bg: 'rgba(239,68,68,0.06)',  dot: '#EF4444', label: 'Crítico' },
-  high:     { border: '#F59E0B', bg: 'rgba(245,158,11,0.06)', dot: '#F59E0B', label: 'Alta'    },
-  normal:   { border: 'var(--border)', bg: 'var(--card)',     dot: '#3B82F6', label: 'Normal'  },
-  good:     { border: '#2DB975', bg: 'rgba(45,185,117,0.06)', dot: '#2DB975', label: 'Bom'     },
-}
 
 type AISummary = { situation: string; urgency: 'critical' | 'high' | 'normal' | 'good'; next_action: string }
 
@@ -328,7 +315,7 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => customers.length === 1 ? setAddFollowUpFor(customers[0].id) : setPicker('followup')}
               className="h-8 gap-1.5 rounded-lg text-[12px] font-medium"
-              style={{ background: 'var(--primary)', color: '#fff' }}>
+              style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>
               <Plus className="h-3.5 w-3.5" /> Follow-up
             </Button>
             <Button size="sm" onClick={() => customers.length === 1 ? setAddInteractionFor(customers[0].id) : setPicker('interaction')}

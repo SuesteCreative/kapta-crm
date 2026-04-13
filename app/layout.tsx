@@ -19,10 +19,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt" className={`h-full ${outfit.variable}`}>
-      <body className="h-full" style={{ fontFamily: 'var(--font-outfit), sans-serif' }}>
+      <body className="h-full">
         <div className="flex h-full">
           <Sidebar />
-          <main className="flex-1 overflow-auto" style={{ background: 'var(--background)' }}>
+          <main className="flex-1 overflow-auto bg-background">
             {children}
           </main>
         </div>

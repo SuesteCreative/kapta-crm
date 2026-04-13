@@ -205,7 +205,7 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
           onClick={runClusterIssues}
           disabled={clustering}
           className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
-          style={{ background: 'var(--primary)', color: '#fff' }}
+          style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
         >
           {clustering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
           {clustering ? 'A analisar…' : 'Agrupar problemas'}
@@ -260,7 +260,7 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
                   onClick={() => createTicketFromCluster(cluster)}
                   disabled={creatingTicketForCluster === cluster.issue_title}
                   className="h-8 rounded-lg text-[12px] font-medium px-3 gap-1.5"
-                  style={{ background: 'var(--primary)', color: '#fff' }}
+                  style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
                 >
                   {creatingTicketForCluster === cluster.issue_title && <Loader2 className="h-3 w-3 animate-spin" />}
                   Criar ticket

@@ -316,7 +316,7 @@ export function FollowUpsClient({
               onClick={runTriage}
               disabled={triaging || needsReply.length === 0}
               className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
-              style={{ background: 'var(--primary)', color: '#fff' }}
+              style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
             >
               {triaging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               {triaging ? 'A analisar…' : 'Analisar com IA'}
@@ -328,7 +328,7 @@ export function FollowUpsClient({
             onClick={runDetectCommitments}
             disabled={detectingCommitments}
             className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
-            style={{ background: 'var(--primary)', color: '#fff' }}
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
             {detectingCommitments ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             {detectingCommitments ? 'A analisar…' : 'Detetar compromissos'}
@@ -513,7 +513,7 @@ export function FollowUpsClient({
                         onClick={() => createFollowUpFromSuggestion(s)}
                         disabled={creatingFollowUpId === s.customer_id}
                         className="h-7 rounded-lg text-[12px] font-medium px-3"
-                        style={{ background: 'var(--primary)', color: '#fff' }}
+                        style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
                       >
                         {creatingFollowUpId === s.customer_id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Criar'}
                       </Button>

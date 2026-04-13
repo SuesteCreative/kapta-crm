@@ -44,7 +44,7 @@ export function CustomersClient({ customers }: { customers: CustomerWithIdentifi
           onClick={() => setShowNew(true)}
           size="sm"
           className="gap-1.5 rounded-lg text-[13px] font-medium"
-          style={{ background: 'var(--primary)', color: '#fff' }}
+          style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
         >
           <Plus className="h-3.5 w-3.5" />
           Novo cliente
@@ -129,12 +129,10 @@ export function CustomersClient({ customers }: { customers: CustomerWithIdentifi
               return (
                 <tr
                   key={c.id}
-                  className="group cursor-pointer transition-colors"
+                  className="group cursor-pointer row-hover"
                   style={{
                     borderBottom: idx < filtered.length - 1 ? '1px solid var(--border)' : 'none',
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--muted)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   onClick={() => router.push(`/customers/${c.id}`)}
                 >
                   <td className="px-5 py-3.5">
