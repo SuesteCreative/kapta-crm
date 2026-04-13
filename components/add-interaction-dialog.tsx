@@ -7,8 +7,21 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ExternalLink } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
+
+function titleFromBubblesUrl(url: string): string {
+  try {
+    const slug = new URL(url).pathname.split('/').filter(Boolean).pop() ?? ''
+    return slug
+      .split('-')
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ')
+  } catch {
+    return ''
+  }
+}
 
 interface Props { open: boolean; customerId: string; onClose: () => void }
 
@@ -104,18 +117,40 @@ export function AddInteractionDialog({ open, customerId, onClose }: Props) {
             <>
               <div className="space-y-1.5">
                 <Label>Link Bubbles (opcional)</Label>
-                <Input
-                  value={form.bubbles_url}
-                  onChange={(e) => setForm({ ...form, bubbles_url: e.target.value })}
-                  placeholder="https://app.usebubbles.com/..."
-                />
-              </div>
-              {form.bubbles_url && (
-                <div className="space-y-1.5">
-                  <Label>Título da gravação</Label>
-                  <Input value={form.bubbles_title} onChange={(e) => setForm({ ...form, bubbles_title: e.target.value })} placeholder="Ex: Reunião com João — Kapta" />
+                <div className="flex gap-2">
+                  <Input
+                    value={form.bubbles_url}
+                    onChange={(e) => {
+                      const url = e.target.value
+                      const title = url.includes('usebubbles.com') ? titleFromBubblesUrl(url) : ''
+                      setForm({
+                        ...form,
+                        bubbles_url: url,
+                        bubbles_title: title || form.bubbles_title,
+                        subject: form.subject || title,
+                      })
+                    }}
+                    placeholder="https://app.usebubbles.com/..."
+                  />
+                  {form.bubbles_url && (
+                    <a
+                      href={form.bubbles_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="h-10 w-10 flex items-center justify-center rounded-lg shrink-0 transition-opacity hover:opacity-70"
+                      style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
+                      title="Abrir no Bubbles"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </a>
+                  )}
                 </div>
-              )}
+                {form.bubbles_url && (
+                  <p className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
+                    Abre o Bubbles → copia o resumo → cola no campo abaixo
+                  </p>
+                )}
+              </div>
             </>
           )}
 
