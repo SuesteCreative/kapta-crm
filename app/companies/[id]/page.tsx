@@ -20,19 +20,26 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
   if (!company) notFound()
 
   const customerIds = (customers ?? []).map((c) => c.id)
-  const { data: interactions } = customerIds.length
-    ? await supabase
-        .from('interactions')
-        .select('*')
-        .in('customer_id', customerIds)
-        .order('occurred_at', { ascending: false })
-    : { data: [] }
+
+  const [{ data: interactions }, { data: followUps }, { data: tickets }] = await Promise.all([
+    customerIds.length
+      ? supabase.from('interactions').select('*').in('customer_id', customerIds).order('occurred_at', { ascending: false })
+      : Promise.resolve({ data: [] }),
+    customerIds.length
+      ? supabase.from('follow_ups').select('id').in('customer_id', customerIds).eq('status', 'open')
+      : Promise.resolve({ data: [] }),
+    customerIds.length
+      ? supabase.from('tickets').select('id').in('customer_id', customerIds).in('status', ['open', 'in-progress'])
+      : Promise.resolve({ data: [] }),
+  ])
 
   return (
     <CompanyDetailClient
       company={company}
       customers={customers ?? []}
       interactions={interactions ?? []}
+      openFollowUps={followUps?.length ?? 0}
+      openTickets={tickets?.length ?? 0}
     />
   )
 }
