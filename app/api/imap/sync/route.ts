@@ -8,13 +8,25 @@ export const dynamic = 'force-dynamic'
  * IMAP Sync — Safe by design:
  * - Reads email metadata + plain-text only (no HTML, no images, no attachments)
  * - Never marks emails as read, never clicks links, never loads remote content
- * - Only logs emails where sender OR recipient is a known customer
+ * - Matches known customers OR auto-creates leads for new inbound senders
  * - Deduplicates by Message-ID so re-syncing is safe
  * - Skips Spam/Junk/Trash automatically
- * - Only fetches UNSEEN (unread) messages since last sync
+ * - Treats the entire sending domain (e.g. @kapta.pt) as internal
  */
 export async function GET() {
   const supabase = createServiceClient()
+
+  // The domain of the IMAP account — all addresses at this domain are
+  // treated as internal and skipped when matching customers.
+  // e.g. if IMAP_USER=pedro@kapta.pt, then site@kapta.pt, bruno@kapta.pt, etc.
+  // are all treated as internal senders and not matched against customer_identifiers.
+  const imapUser   = process.env.IMAP_USER?.toLowerCase() ?? ''
+  const ownDomain  = imapUser.split('@')[1] ?? ''
+
+  function isInternal(email: string): boolean {
+    const e = email.toLowerCase().trim()
+    return e === imapUser || (ownDomain.length > 0 && e.endsWith('@' + ownDomain))
+  }
 
   const client = new ImapFlow({
     host: process.env.IMAP_HOST!,
@@ -28,9 +40,10 @@ export async function GET() {
     logger: false,
   })
 
-  let synced = 0
-  let skipped = 0
-  let unknown = 0
+  let synced    = 0
+  let skipped   = 0
+  let unknown   = 0
+  let created   = 0
 
   try {
     await client.connect()
@@ -42,17 +55,14 @@ export async function GET() {
     ]
 
     for (const { path, direction } of mailboxes) {
-      // Some servers use "Sent Items" or "Sent Messages"
       let lock
       try {
         lock = await client.getMailboxLock(path)
       } catch {
-        // Mailbox doesn't exist on this server — skip silently
         continue
       }
 
       try {
-        // Fetch all emails — deduplication by source_id prevents double imports
         const uids: number[] = []
         for await (const msg of client.fetch('1:*', { uid: true })) {
           uids.push(msg.uid)
@@ -66,8 +76,7 @@ export async function GET() {
           uid: true,
           envelope: true,
           internalDate: true,
-          // Plain text body only — no HTML, no attachments, no tracking pixels
-          bodyParts: ['1'],  // MIME part 1 = text/plain
+          bodyParts: ['1'],
         }, { uid: true })) {
 
           const messageId = msg.envelope?.messageId
@@ -82,7 +91,8 @@ export async function GET() {
           if (existing) { skipped++; continue }
 
           // ── Resolve customer ──
-          // Inbound: match sender or CC'd contact. Outbound: match recipients.
+          // Inbound: match sender + CC. Outbound: match recipients + CC.
+          // Internal addresses (same domain) are skipped.
           const addresses =
             direction === 'inbound'
               ? [...(msg.envelope?.from ?? []), ...(msg.envelope?.cc ?? [])]
@@ -90,12 +100,19 @@ export async function GET() {
 
           let customerId: string | null = null
           let matchedEmail = ''
+          let primarySenderEmail = ''
+          let primarySenderName  = ''
 
           for (const addr of addresses) {
             if (!addr.address) continue
             const email = addr.address.toLowerCase().trim()
-            // Skip our own address
-            if (email === process.env.IMAP_USER?.toLowerCase()) continue
+            if (isInternal(email)) continue
+
+            // Track the first external address as the primary sender (for auto-create)
+            if (!primarySenderEmail) {
+              primarySenderEmail = email
+              primarySenderName  = addr.name?.trim() || email.split('@')[0]
+            }
 
             const { data: identifier } = await supabase
               .from('customer_identifiers')
@@ -104,26 +121,50 @@ export async function GET() {
               .maybeSingle()
 
             if (identifier) {
-              customerId = (identifier as { customer_id: string }).customer_id
+              customerId   = (identifier as { customer_id: string }).customer_id
               matchedEmail = email
               break
             }
           }
 
-          // Not a known customer — skip entirely (phishing/spam never match)
+          // ── Auto-create lead for unknown inbound senders ──
+          // Outbound to unknown = noise (newsletters, auto-replies, etc.) — skip.
+          if (!customerId && direction === 'inbound' && primarySenderEmail) {
+            const senderName = primarySenderName || primarySenderEmail.split('@')[0]
+
+            const { data: newCustomer, error: insertErr } = await supabase
+              .from('customers')
+              .insert({
+                name:         senderName,
+                status:       'onboarding',
+                health_score: 3,
+              })
+              .select('id')
+              .single()
+
+            if (!insertErr && newCustomer) {
+              await supabase.from('customer_identifiers').insert({
+                customer_id: newCustomer.id,
+                type:        'email',
+                value:       primarySenderEmail,
+                is_primary:  true,
+              })
+              customerId   = newCustomer.id
+              matchedEmail = primarySenderEmail
+              created++
+            }
+          }
+
           if (!customerId) { unknown++; continue }
 
           const subject = msg.envelope?.subject ?? null
           const rawDate = msg.internalDate ?? msg.envelope?.date ?? new Date()
           const date    = rawDate instanceof Date ? rawDate : new Date(rawDate)
 
-          // Extract plain text from body part 1
           let bodyText = ''
           if (msg.bodyParts) {
             const part = msg.bodyParts.get('1')
-            if (part) {
-              bodyText = part.toString('utf8').trim().slice(0, 4000)
-            }
+            if (part) bodyText = part.toString('utf8').trim().slice(0, 4000)
           }
 
           const { error } = await supabase.from('interactions').insert({
@@ -149,18 +190,17 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       synced,
+      created_leads: created,
       skipped_duplicate: skipped,
-      skipped_unknown_sender: unknown,
-      message: `${synced} imported, ${skipped} duplicates, ${unknown} from unknown senders`,
+      skipped_unknown_outbound: unknown,
+      message: `${synced} imported, ${created} new leads, ${skipped} duplicates, ${unknown} unknown outbound`,
     })
   } catch (error) {
     const host = process.env.IMAP_HOST ?? '(not set)'
     const port = process.env.IMAP_PORT ?? '993'
-    const err = error as unknown as Record<string, unknown>
-    const msg = error instanceof Error ? error.message : String(error)
-    const response = err.response ?? null
-    const code = err.code ?? null
-    const fullError = `[${host}:${port}] ${msg} | response=${JSON.stringify(response)} | code=${code}`
+    const err  = error as unknown as Record<string, unknown>
+    const msg  = error instanceof Error ? error.message : String(error)
+    const fullError = `[${host}:${port}] ${msg} | response=${JSON.stringify(err.response ?? null)} | code=${err.code ?? null}`
     console.error('IMAP sync error:', fullError)
     return NextResponse.json({ ok: false, error: fullError }, { status: 500 })
   }
