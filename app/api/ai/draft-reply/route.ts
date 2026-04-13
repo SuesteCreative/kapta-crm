@@ -118,10 +118,8 @@ ${text}`
   const lastSubject = interactions.find((i) => i.subject)?.subject ?? ''
 
   const basePrompt = language === 'en' ? SYSTEM_PROMPT_EN : SYSTEM_PROMPT_PT
-  const defaultSignoff = language === 'en' ? 'Best regards,\nPedro' : 'Com os melhores cumprimentos,\nPedro'
-  const signoffInstruction = signature
-    ? `Use this exact sign-off at the end of the email body (replace the default sign-off with the one below):\n\n${signature}`
-    : `Use "${defaultSignoff}" as sign-off.`
+  // Sign-off is appended by the send route as an HTML signature — do not include it in the body
+  const signoffInstruction = `Do NOT include a sign-off or closing at the end of the body. End the email after the last sentence of content. The signature will be added automatically.`
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 

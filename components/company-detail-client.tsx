@@ -105,12 +105,11 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
   const [aiSummary,          setAiSummary]          = useState<AISummary | null>(null)
   const [loadingSummary,     setLoadingSummary]     = useState(false)
 
-  const customerMap = Object.fromEntries(customers.map((c) => [c.id, c.name]))
-
   const fetchSummary = useCallback(async () => {
     if (interactions.length === 0) return
     setLoadingSummary(true)
     try {
+      const cMap = Object.fromEntries(customers.map((c) => [c.id, c.name]))
       const res = await fetch('/api/ai/company-summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -123,7 +122,7 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
             subject: i.subject,
             content: i.content,
             occurred_at: i.occurred_at,
-            customer_name: customerMap[i.customer_id] ?? '',
+            customer_name: cMap[i.customer_id] ?? '',
           })),
           open_follow_ups: openFollowUps,
           open_tickets: openTickets,
@@ -133,7 +132,10 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
       if (json.ok) setAiSummary(json)
     } catch { /* silent */ }
     finally { setLoadingSummary(false) }
-  }, [company.name, customers, interactions, openFollowUps, openTickets, customerMap])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company.name, company.id, interactions.length, openFollowUps, openTickets])
+
+  const customerMap = Object.fromEntries(customers.map((c) => [c.id, c.name]))
 
   useEffect(() => { fetchSummary() }, [fetchSummary])
 
@@ -155,7 +157,6 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
     ]
     navigator.clipboard.writeText(lines.join('\n'))
     toast.success('Mensagem copiada — cola no grupo WhatsApp')
-    window.open('https://web.whatsapp.com', '_blank')
   }
 
   // Resolve email for a customer
