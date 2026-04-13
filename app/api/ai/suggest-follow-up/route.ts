@@ -47,17 +47,28 @@ ${text}
 Qual o follow-up mais importante que Pedro deve criar?`
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
-  const message = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 200,
-    system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: prompt }],
-  })
+  let message
+  try {
+    message = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 200,
+      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: prompt }],
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('Claude API error:', msg)
+    return NextResponse.json({ ok: false, error: `Claude error: ${msg}` }, { status: 500 })
+  }
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
   const match = rawText.match(/\{[\s\S]*\}/)
+  if (!match) {
+    console.error('Claude non-JSON response:', rawText.slice(0, 200))
+    return NextResponse.json({ ok: false, error: 'Claude returned unexpected format' }, { status: 500 })
+  }
   try {
-    const result = JSON.parse(match?.[0] ?? '{}')
+    const result = JSON.parse(match[0])
     return NextResponse.json({ ok: true, ...result })
   } catch {
     return NextResponse.json({ ok: false, error: 'Erro ao processar.' }, { status: 500 })

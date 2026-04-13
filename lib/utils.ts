@@ -84,6 +84,12 @@ export const HEALTH_COLORS: Record<number, string> = {
   5: 'text-emerald-500',
 }
 
+/** Clamps health_score to 1–5 and returns the matching color class. Safe for any DB value. */
+export function healthColor(score: number): string {
+  const clamped = Math.max(1, Math.min(5, Math.round(score)))
+  return HEALTH_COLORS[clamped] ?? 'text-muted-foreground'
+}
+
 /** Extract Bubbles video ID from URL for embed */
 export function getBubblesEmbedUrl(url: string): string | null {
   const match = url.match(/usebubbles\.com\/([a-zA-Z0-9]+)/)

@@ -28,9 +28,8 @@ const DIRECTION_FILTERS = [
   { key: 'outbound', label: 'Enviados' },
 ]
 
-export function EmailsClient({ emails: initial }: { emails: EmailRow[] }) {
+export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const router = useRouter()
-  const [emails, setEmails]           = useState(initial)
   const [search, setSearch]           = useState('')
   const [dirFilter, setDirFilter]     = useState<string | null>(null)
   const [syncing, setSyncing]         = useState(false)

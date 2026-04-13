@@ -12,20 +12,28 @@ export const dynamic = 'force-dynamic'
  * - Deduplicates by Message-ID so re-syncing is safe
  * - Skips Spam/Junk/Trash automatically
  * - Treats the entire sending domain (e.g. @kapta.pt) as internal
+ * - Pre-loads all customer identifiers into a Map — no N+1 queries
  */
 export async function GET() {
   const supabase = createServiceClient()
 
-  // The domain of the IMAP account — all addresses at this domain are
-  // treated as internal and skipped when matching customers.
-  // e.g. if IMAP_USER=pedro@kapta.pt, then site@kapta.pt, bruno@kapta.pt, etc.
-  // are all treated as internal senders and not matched against customer_identifiers.
-  const imapUser   = process.env.IMAP_USER?.toLowerCase() ?? ''
-  const ownDomain  = imapUser.split('@')[1] ?? ''
+  const imapUser  = process.env.IMAP_USER?.toLowerCase() ?? ''
+  const ownDomain = imapUser.split('@')[1] ?? ''
 
   function isInternal(email: string): boolean {
     const e = email.toLowerCase().trim()
     return e === imapUser || (ownDomain.length > 0 && e.endsWith('@' + ownDomain))
+  }
+
+  // ── Pre-load ALL email identifiers once — avoids N+1 in the email loop ──
+  const { data: allIdentifiers } = await supabase
+    .from('customer_identifiers')
+    .select('value, customer_id')
+    .eq('type', 'email')
+
+  const emailToCustomerId = new Map<string, string>()
+  for (const id of allIdentifiers ?? []) {
+    emailToCustomerId.set(id.value.toLowerCase().trim(), id.customer_id)
   }
 
   const client = new ImapFlow({
@@ -40,15 +48,14 @@ export async function GET() {
     logger: false,
   })
 
-  let synced    = 0
-  let skipped   = 0
-  let unknown   = 0
-  let created   = 0
+  let synced  = 0
+  let skipped = 0
+  let unknown = 0
+  let created = 0
 
   try {
     await client.connect()
 
-    // Process both INBOX (inbound) and Sent (outbound)
     const mailboxes: { path: string; direction: 'inbound' | 'outbound' }[] = [
       { path: 'INBOX', direction: 'inbound' },
       { path: 'Sent',  direction: 'outbound' },
@@ -68,7 +75,6 @@ export async function GET() {
           uids.push(msg.uid)
         }
 
-        // Process newest first, max 2000 per sync run
         const toProcess = uids.reverse().slice(0, 2000)
         if (toProcess.length === 0) continue
 
@@ -90,9 +96,7 @@ export async function GET() {
             .maybeSingle()
           if (existing) { skipped++; continue }
 
-          // ── Resolve customer ──
-          // Inbound: match sender + CC. Outbound: match recipients + CC.
-          // Internal addresses (same domain) are skipped.
+          // ── Resolve customer via Map (no DB query per email) ──
           const addresses =
             direction === 'inbound'
               ? [...(msg.envelope?.from ?? []), ...(msg.envelope?.cc ?? [])]
@@ -108,37 +112,26 @@ export async function GET() {
             const email = addr.address.toLowerCase().trim()
             if (isInternal(email)) continue
 
-            // Track the first external address as the primary sender (for auto-create)
             if (!primarySenderEmail) {
               primarySenderEmail = email
               primarySenderName  = addr.name?.trim() || email.split('@')[0]
             }
 
-            const { data: identifier } = await supabase
-              .from('customer_identifiers')
-              .select('customer_id')
-              .eq('value', email)
-              .maybeSingle()
-
-            if (identifier) {
-              customerId   = (identifier as { customer_id: string }).customer_id
+            const found = emailToCustomerId.get(email)
+            if (found) {
+              customerId   = found
               matchedEmail = email
               break
             }
           }
 
           // ── Auto-create lead for unknown inbound senders ──
-          // Outbound to unknown = noise (newsletters, auto-replies, etc.) — skip.
           if (!customerId && direction === 'inbound' && primarySenderEmail) {
             const senderName = primarySenderName || primarySenderEmail.split('@')[0]
 
             const { data: newCustomer, error: insertErr } = await supabase
               .from('customers')
-              .insert({
-                name:         senderName,
-                status:       'onboarding',
-                health_score: 3,
-              })
+              .insert({ name: senderName, status: 'onboarding', health_score: 3 })
               .select('id')
               .single()
 
@@ -149,6 +142,8 @@ export async function GET() {
                 value:       primarySenderEmail,
                 is_primary:  true,
               })
+              // Register new identifier in Map so subsequent emails from same sender match
+              emailToCustomerId.set(primarySenderEmail, newCustomer.id)
               customerId   = newCustomer.id
               matchedEmail = primarySenderEmail
               created++

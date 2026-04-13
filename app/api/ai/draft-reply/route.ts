@@ -123,24 +123,34 @@ ${text}`
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    system: [{ type: 'text', text: `${basePrompt}\n\n${signoffInstruction}`, cache_control: { type: 'ephemeral' } }],
-    messages: [{
-      role: 'user',
-      content: `Write a reply to this email thread. The last message is from ${customer_name} and needs a response.\n\nThread:\n\n${emailThread}\n\nUse "Re: ${lastSubject}" as subject (or adjust slightly if needed).`,
-    }],
-  })
+  let message
+  try {
+    message = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: [{ type: 'text', text: `${basePrompt}\n\n${signoffInstruction}`, cache_control: { type: 'ephemeral' } }],
+      messages: [{
+        role: 'user',
+        content: `Write a reply to this email thread. The last message is from ${customer_name} and needs a response.\n\nThread:\n\n${emailThread}\n\nUse "Re: ${lastSubject}" as subject (or adjust slightly if needed).`,
+      }],
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('Claude API error:', msg)
+    return NextResponse.json({ ok: false, error: `Claude error: ${msg}` }, { status: 500 })
+  }
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
   const match = rawText.match(/\{[\s\S]*\}/)
-  const raw = match ? match[0] : '{}'
+  if (!match) {
+    console.error('Claude non-JSON response:', rawText.slice(0, 200))
+    return NextResponse.json({ ok: false, error: 'Claude returned unexpected format' }, { status: 500 })
+  }
 
   try {
-    const result = JSON.parse(raw)
+    const result = JSON.parse(match[0])
     return NextResponse.json({ ok: true, ...result })
   } catch {
-    return NextResponse.json({ ok: false, error: 'Claude returned invalid JSON', raw }, { status: 500 })
+    return NextResponse.json({ ok: false, error: 'Claude returned invalid JSON' }, { status: 500 })
   }
 }

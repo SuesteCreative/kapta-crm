@@ -130,22 +130,32 @@ export async function POST() {
 
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 3000,
-      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: `Analyze these companies:\n\n${batchText}` }],
-    })
+    let message
+    try {
+      message = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 3000,
+        system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: `Analyze these companies:\n\n${batchText}` }],
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('Claude API error:', msg)
+      return NextResponse.json({ ok: false, error: `Claude error: ${msg}` }, { status: 500 })
+    }
 
     const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
     const match = rawText.match(/\[[\s\S]*\]/)
-    const raw = match ? match[0] : '[]'
+    if (!match) {
+      console.error('Claude non-JSON response:', rawText.slice(0, 200))
+      return NextResponse.json({ ok: false, error: 'Claude returned unexpected format' }, { status: 500 })
+    }
 
     try {
-      const parsed = JSON.parse(raw) as CleanResult[]
+      const parsed = JSON.parse(match[0]) as CleanResult[]
       aiResults.push(...parsed)
     } catch {
-      return NextResponse.json({ ok: false, error: 'Claude returned invalid JSON', raw }, { status: 500 })
+      return NextResponse.json({ ok: false, error: 'Claude returned invalid JSON' }, { status: 500 })
     }
   }
 

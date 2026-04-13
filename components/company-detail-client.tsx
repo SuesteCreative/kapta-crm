@@ -16,7 +16,7 @@ import { EditCompanyDialog } from '@/components/edit-company-dialog'
 import { AddInteractionDialog } from '@/components/add-interaction-dialog'
 import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
 import { SendEmailDialog } from '@/components/send-email-dialog'
-import { cn, STATUS_STYLES, STATUS_LABELS, HEALTH_COLORS, URGENCY_STYLES, formatDateTime, formatDate } from '@/lib/utils'
+import { cn, STATUS_STYLES, STATUS_LABELS, healthColor, URGENCY_STYLES, formatDateTime, formatDate } from '@/lib/utils'
 import { CHANNEL_CONFIG } from '@/lib/channel-config'
 import { toast } from 'sonner'
 import type { Company, CustomerWithIdentifiers, Interaction } from '@/lib/database.types'
@@ -374,7 +374,7 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
                     ))}
                   </div>
                 </div>
-                <span className={cn('flex items-center gap-1 text-sm font-medium shrink-0', HEALTH_COLORS[c.health_score])}>
+                <span className={cn('flex items-center gap-1 text-sm font-medium shrink-0', healthColor(c.health_score))}>
                   <Heart className="h-3.5 w-3.5 fill-current" /> {c.health_score}/5
                 </span>
               </Link>

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Plus, Search, Heart } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { cn, STATUS_STYLES, STATUS_LABELS, HEALTH_COLORS } from '@/lib/utils'
+import { cn, STATUS_STYLES, STATUS_LABELS, healthColor } from '@/lib/utils'
 import type { CustomerWithIdentifiers } from '@/lib/database.types'
 import { NewCustomerDialog } from '@/components/new-customer-dialog'
 
@@ -162,7 +162,7 @@ export function CustomersClient({ customers }: { customers: CustomerWithIdentifi
                     {c.plan ?? '—'}
                   </td>
                   <td className="px-5 py-3.5">
-                    <span className={cn('flex items-center gap-1 text-[13px] font-medium', HEALTH_COLORS[c.health_score])}>
+                    <span className={cn('flex items-center gap-1 text-[13px] font-medium', healthColor(c.health_score))}>
                       <Heart className="h-3 w-3 fill-current" />
                       {c.health_score}/5
                     </span>

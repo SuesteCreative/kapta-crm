@@ -87,23 +87,32 @@ export async function POST(req: Request) {
     })
   }).join('\n')
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2048,
-    system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: `Classify these emails:\n\n${emailsText}` }],
-  })
+  let message
+  try {
+    message = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Classify these emails:\n\n${emailsText}` }],
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('Claude API error:', msg)
+    return NextResponse.json({ ok: false, error: `Claude error: ${msg}` }, { status: 500 })
+  }
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
-  // Extract JSON array regardless of surrounding text or code fences
   const match = rawText.match(/\[[\s\S]*\]/)
-  const raw = match ? match[0] : '[]'
+  if (!match) {
+    console.error('Claude non-JSON response:', rawText.slice(0, 200))
+    return NextResponse.json({ ok: false, error: 'Claude returned unexpected format' }, { status: 500 })
+  }
 
   let results: SpamResult[] = []
   try {
-    results = JSON.parse(raw)
+    results = JSON.parse(match[0])
   } catch {
-    return NextResponse.json({ ok: false, error: 'Claude returned invalid JSON', raw }, { status: 500 })
+    return NextResponse.json({ ok: false, error: 'Claude returned invalid JSON' }, { status: 500 })
   }
 
   const spamIds = results.filter((r) => r.is_spam).map((r) => r.interaction_id)

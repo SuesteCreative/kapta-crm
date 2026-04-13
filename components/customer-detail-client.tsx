@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import {
   cn, STATUS_STYLES, STATUS_LABELS, PRIORITY_STYLES,
-  HEALTH_COLORS, URGENCY_STYLES, formatDateTime, dueDateLabel,
+  healthColor, URGENCY_STYLES, formatDateTime, dueDateLabel,
 } from '@/lib/utils'
 import { CHANNEL_CONFIG } from '@/lib/channel-config'
 import type { CustomerWithIdentifiers, Interaction, FollowUp, Ticket } from '@/lib/database.types'
@@ -258,7 +258,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                   <Tag className="h-3.5 w-3.5 shrink-0" /> {customer.plan}
                 </span>
               )}
-              <span className={cn('flex items-center gap-1.5 text-sm font-medium', HEALTH_COLORS[customer.health_score])}>
+              <span className={cn('flex items-center gap-1.5 text-sm font-medium', healthColor(customer.health_score))}>
                 <Heart className="h-3.5 w-3.5 fill-current" /> {customer.health_score}/5
               </span>
             </div>
