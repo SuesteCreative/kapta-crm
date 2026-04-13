@@ -626,7 +626,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
 
       {/* Modals */}
       <AddInteractionDialog    open={showAddInteraction}    customerId={customer.id} onClose={() => { setShowAddInteraction(false);    refresh() }} />
-      <AddFollowUpDialog       open={showAddFollowUp}       customerId={customer.id} onClose={() => { setShowAddFollowUp(false);       refresh() }} />
+      <AddFollowUpDialog       open={showAddFollowUp}       customerId={customer.id} customerName={customer.name} customerCompany={customer.company} interactions={interactions.slice(0, 8).map((i) => ({ type: i.type, direction: i.direction, subject: i.subject, content: i.content, occurred_at: i.occurred_at }))} onClose={() => { setShowAddFollowUp(false);       refresh() }} />
       <TicketBuilderDialog     open={showTicketBuilder}     customer={customer}     interactions={interactions}     onClose={() => { setShowTicketBuilder(false);     refresh() }} />
       <EditCustomerDialog      open={showEditCustomer}      customer={customer}      onClose={() => { setShowEditCustomer(false);      refresh() }} />
       <PasteConversationDialog open={showPasteConversation} customerId={customer.id} onClose={() => { setShowPasteConversation(false); refresh() }} />

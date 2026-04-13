@@ -7,16 +7,65 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Sparkles, Loader2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 
-interface Props { open: boolean; customerId: string; onClose: () => void }
+interface InteractionContext {
+  type: string
+  direction: string | null
+  subject: string | null
+  content: string | null
+  occurred_at: string
+}
 
-export function AddFollowUpDialog({ open, customerId, onClose }: Props) {
-  const [loading, setLoading] = useState(false)
+interface Props {
+  open: boolean
+  customerId: string
+  customerName?: string
+  customerCompany?: string | null
+  interactions?: InteractionContext[]
+  onClose: () => void
+}
+
+export function AddFollowUpDialog({ open, customerId, customerName, customerCompany, interactions = [], onClose }: Props) {
+  const [loading,     setLoading]     = useState(false)
+  const [suggesting,  setSuggesting]  = useState(false)
   const [form, setForm] = useState({
     title: '', description: '', due_date: '', priority: 'medium' as 'low' | 'medium' | 'high' | 'urgent',
   })
+
+  async function suggestWithAI() {
+    if (interactions.length === 0) {
+      toast.error('Sem interações para analisar.')
+      return
+    }
+    setSuggesting(true)
+    try {
+      const res = await fetch('/api/ai/suggest-follow-up', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_name: customerName ?? 'Cliente',
+          customer_company: customerCompany ?? null,
+          interactions,
+        }),
+      })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error)
+      setForm((f) => ({
+        ...f,
+        title: json.title ?? f.title,
+        description: json.description ?? f.description,
+        priority: json.priority ?? f.priority,
+      }))
+      toast.success('Sugestão gerada — revê antes de criar.')
+    } catch {
+      toast.error('Erro ao gerar sugestão.')
+    } finally {
+      setSuggesting(false)
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -46,13 +95,39 @@ export function AddFollowUpDialog({ open, customerId, onClose }: Props) {
       <DialogContent>
         <DialogHeader><DialogTitle>Novo follow-up</DialogTitle></DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+
+          {/* AI suggest button — only if context is available */}
+          {interactions.length > 0 && (
+            <Button
+              type="button"
+              onClick={suggestWithAI}
+              disabled={suggesting}
+              className="w-full h-9 gap-2 rounded-lg text-[13px] font-medium"
+              style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)', border: '1px solid rgba(91,91,214,0.25)' }}
+            >
+              {suggesting
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> A gerar sugestão…</>
+                : <><Sparkles className="h-3.5 w-3.5" /> Gerar com IA</>}
+            </Button>
+          )}
+
           <div className="space-y-1.5">
             <Label>Título *</Label>
-            <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Ex: Verificar se resolveram o problema" required />
+            <Input
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              placeholder="Ex: Verificar se resolveram o problema"
+              required
+            />
           </div>
           <div className="space-y-1.5">
             <Label>Descrição</Label>
-            <Textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Contexto adicional…" />
+            <Textarea
+              rows={3}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              placeholder="Contexto adicional…"
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

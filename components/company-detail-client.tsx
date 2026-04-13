@@ -429,8 +429,14 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
       )}
 
       {addFollowUpFor && (
-        <AddFollowUpDialog open customerId={addFollowUpFor}
-          onClose={() => { setAddFollowUpFor(null); router.refresh() }} />
+        <AddFollowUpDialog
+          open
+          customerId={addFollowUpFor}
+          customerName={customers.find((c) => c.id === addFollowUpFor)?.name}
+          customerCompany={company.name}
+          interactions={interactions.slice(0, 8).map((i) => ({ type: i.type, direction: i.direction, subject: i.subject, content: i.content, occurred_at: i.occurred_at }))}
+          onClose={() => { setAddFollowUpFor(null); router.refresh() }}
+        />
       )}
 
       {emailFor && selectedCustomer && (
