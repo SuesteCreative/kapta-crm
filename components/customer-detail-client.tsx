@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Mail, MessageSquare, Video, Phone, FileText,
   Plus, ExternalLink, Heart, Building2, Tag,
   CheckCircle2, Circle, Pencil, ArrowLeft, ClipboardPaste,
-  Sparkles, Loader2, ChevronDown, ChevronUp,
+  Sparkles, Loader2, ChevronDown, ChevronUp, RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -103,8 +103,48 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
 
   const openFollowUps = followUps.filter((f) => f.status === 'open')
   const doneFollowUps = followUps.filter((f) => f.status === 'done')
+  const openTickets   = tickets.filter((t) => t.status === 'open' || t.status === 'in-progress')
   const statusStyle   = STATUS_STYLES[customer.status]
   const refresh       = () => router.refresh()
+
+  type AISummary = { situation: string; urgency: 'critical' | 'high' | 'normal' | 'good'; next_action: string }
+  const [aiSummary,        setAiSummary]        = useState<AISummary | null>(null)
+  const [loadingSummary,   setLoadingSummary]   = useState(false)
+
+  const fetchSummary = useCallback(async () => {
+    if (interactions.length === 0) return
+    setLoadingSummary(true)
+    try {
+      const res = await fetch('/api/ai/customer-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_name: customer.name,
+          customer_company: customer.company,
+          open_follow_ups: openFollowUps.length,
+          open_tickets: openTickets.length,
+          interactions: interactions.slice(0, 10).map((i) => ({
+            type: i.type,
+            direction: i.direction,
+            subject: i.subject,
+            content: i.content,
+            occurred_at: i.occurred_at,
+          })),
+        }),
+      })
+      const text = await res.text()
+      let json: { ok: boolean } & Partial<AISummary>
+      try { json = JSON.parse(text) } catch { return }
+      if (json.ok && json.situation) {
+        setAiSummary({ situation: json.situation, urgency: json.urgency ?? 'normal', next_action: json.next_action ?? '' })
+      }
+    } finally {
+      setLoadingSummary(false)
+    }
+  }, [customer.name, customer.company, interactions, openFollowUps.length, openTickets.length])
+
+  // Auto-fetch on mount
+  useEffect(() => { fetchSummary() }, [fetchSummary])
 
   async function toggleFollowUp(id: string, current: string) {
     const next = current === 'done' ? 'open' : 'done'
@@ -217,6 +257,66 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
           </div>
         )}
       </div>
+
+      {/* AI Situation Summary */}
+      {(() => {
+        const URGENCY_STYLES = {
+          critical: { border: '#E5484D', bg: 'rgba(229,72,77,0.07)', dot: '#E5484D', label: 'Crítico' },
+          high:     { border: '#F59E0B', bg: 'rgba(245,158,11,0.07)', dot: '#F59E0B', label: 'Urgente' },
+          normal:   { border: 'var(--border)', bg: 'rgba(91,91,214,0.05)', dot: 'var(--primary)', label: '' },
+          good:     { border: '#2DB975', bg: 'rgba(45,185,117,0.06)', dot: '#2DB975', label: '' },
+        }
+        const style = aiSummary ? URGENCY_STYLES[aiSummary.urgency] : URGENCY_STYLES.normal
+
+        return (
+          <div
+            className="rounded-xl px-5 py-4"
+            style={{ background: aiSummary ? style.bg : 'var(--card)', border: `1px solid ${aiSummary ? style.border : 'var(--border)'}`, minHeight: 64 }}
+          >
+            {loadingSummary && !aiSummary && (
+              <div className="flex items-center gap-2" style={{ color: 'var(--muted-foreground)' }}>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span className="text-[13px]">A analisar situação…</span>
+              </div>
+            )}
+            {aiSummary && (
+              <div className="flex items-start gap-3">
+                <div className="mt-1 w-2 h-2 rounded-full shrink-0" style={{ background: style.dot }} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--primary)' }}>
+                      Situação atual
+                    </span>
+                    {style.label && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider rounded-full px-1.5 py-0.5" style={{ background: `${style.dot}20`, color: style.dot }}>
+                        {style.label}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[13.5px] leading-relaxed" style={{ color: 'var(--foreground)' }}>
+                    {aiSummary.situation}
+                  </p>
+                  {aiSummary.next_action && (
+                    <p className="text-[12px] mt-1.5 flex items-center gap-1.5" style={{ color: style.dot === 'var(--primary)' ? 'var(--primary)' : style.dot }}>
+                      <Sparkles className="h-3 w-3 shrink-0" />
+                      {aiSummary.next_action}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={fetchSummary}
+                  disabled={loadingSummary}
+                  className="shrink-0 h-6 w-6 flex items-center justify-center rounded-md transition-opacity hover:opacity-70 disabled:opacity-40"
+                  style={{ color: 'var(--muted-foreground)' }}
+                  title="Atualizar"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Tabs */}
       <Tabs defaultValue="timeline">

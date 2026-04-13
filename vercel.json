@@ -39,6 +39,9 @@
     "app/api/ai/summarize-email/route.ts": {
       "maxDuration": 30
     },
+    "app/api/ai/customer-summary/route.ts": {
+      "maxDuration": 30
+    },
     "app/api/ai/weekly-digest/route.ts": {
       "maxDuration": 60
     }
