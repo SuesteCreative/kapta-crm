@@ -370,11 +370,16 @@ export function FollowUpsClient({
                 : entry.daysWaiting >= 7 ? '#EF4444' : entry.daysWaiting >= 3 ? '#F59E0B' : '#2DB975'
 
               return (
-                <div key={entry.customerId} className="relative">
+                <div
+                  key={entry.customerId}
+                  className="flex items-stretch rounded-xl overflow-hidden"
+                  style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+                >
+                  {/* Main content — navigates to customer */}
                   <Link
                     href={`/customers/${entry.customerId}`}
-                    className="flex items-start gap-3 rounded-xl p-4 pr-24 transition-opacity hover:opacity-80"
-                    style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', display: 'flex' }}
+                    className="flex items-start gap-3 flex-1 p-4 transition-opacity hover:opacity-80 min-w-0"
+                    style={{ display: 'flex' }}
                   >
                     <div className="mt-1.5 w-2 h-2 rounded-full shrink-0" style={{ background: dotColor }} />
 
@@ -396,7 +401,6 @@ export function FollowUpsClient({
                         )}
                       </div>
 
-                      {/* AI summary takes priority over subject */}
                       {triage ? (
                         <>
                           <p className="text-xs mt-0.5" style={{ color: 'var(--foreground)', opacity: 0.8 }}>
@@ -415,7 +419,8 @@ export function FollowUpsClient({
                       )}
                     </div>
 
-                    <div className="flex flex-col items-end gap-1 shrink-0">
+                    {/* Badges */}
+                    <div className="flex flex-col items-end gap-1 shrink-0 ml-2">
                       {triage && (
                         <span
                           className="text-[10px] font-semibold uppercase rounded-full px-2 py-0.5"
@@ -435,12 +440,16 @@ export function FollowUpsClient({
                       </span>
                     </div>
                   </Link>
-                  {/* Action buttons: reply + dismiss */}
-                  <div className="absolute top-2 right-2 flex items-center gap-1">
+
+                  {/* Action buttons — separate column, no navigation */}
+                  <div
+                    className="flex flex-col items-center justify-center gap-1.5 px-3"
+                    style={{ borderLeft: '1px solid var(--border)' }}
+                  >
                     {entry.email && (
                       <button
-                        onClick={(e) => { e.preventDefault(); setReplyTarget(entry) }}
-                        className="h-6 px-2 flex items-center gap-1 rounded-md text-[11px] font-medium transition-colors hover:opacity-80"
+                        onClick={() => setReplyTarget(entry)}
+                        className="h-7 px-2.5 flex items-center gap-1 rounded-lg text-[11px] font-medium transition-opacity hover:opacity-70"
                         style={{ background: 'rgba(91,91,214,0.12)', color: 'var(--primary)' }}
                         title="Responder"
                       >
@@ -449,7 +458,7 @@ export function FollowUpsClient({
                     )}
                     <button
                       onClick={() => markSpam(entry.interactionId)}
-                      className="h-6 w-6 flex items-center justify-center rounded-md transition-colors hover:opacity-70"
+                      className="h-6 w-6 flex items-center justify-center rounded-md transition-opacity hover:opacity-70"
                       style={{ color: 'var(--muted-foreground)' }}
                       title="Marcar como spam"
                     >

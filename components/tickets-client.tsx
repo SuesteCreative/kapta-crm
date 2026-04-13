@@ -179,7 +179,6 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
     const msg = ticketToWhatsApp(t)
     await navigator.clipboard.writeText(msg)
     toast.success('Mensagem copiada — cola no grupo Kapta Dev Ops 💬')
-    window.open('https://web.whatsapp.com', '_blank')
   }
 
   async function copyTicket(t: TicketWithCustomer) {
