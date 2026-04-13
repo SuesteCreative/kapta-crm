@@ -34,6 +34,17 @@ export async function POST(request: Request) {
 
   const supabase = createServiceClient()
 
+  // Fetch signature once
+  const { data: sigRow } = await supabase
+    .from('templates')
+    .select('body')
+    .eq('name', '__signature__')
+    .maybeSingle()
+  const sigHtml = sigRow?.body ?? null
+  const sigText = sigHtml
+    ? sigHtml.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    : null
+
   // Resolve primary email per customer in one query
   const { data: identifiers } = await supabase
     .from('customer_identifiers')
@@ -69,11 +80,15 @@ export async function POST(request: Request) {
     }
 
     try {
+      const htmlEmail = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#333;max-width:600px;">${body.replace(/\n/g, '<br>')}${sigHtml ? `<br><br>${sigHtml}` : ''}</div>`
+      const textEmail = sigText ? `${body}\n\n--\n${sigText}` : body
+
       const info = await transporter.sendMail({
         from: process.env.SMTP_USER,
         to: email,
         subject,
-        text: body,
+        text: textEmail,
+        html: htmlEmail,
       })
 
       // Log as outbound interaction

@@ -44,6 +44,15 @@
     },
     "app/api/ai/weekly-digest/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/ai/detect-commitments/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/ai/cluster-issues/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/email/send-bulk/route.ts": {
+      "maxDuration": 60
     }
   }
 }
