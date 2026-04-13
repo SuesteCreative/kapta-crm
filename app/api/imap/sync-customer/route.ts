@@ -112,7 +112,8 @@ export async function POST(req: Request) {
         }, { uid: true })) {
 
           // Use Message-ID for dedup; fall back to date+subject if missing
-          const emailDate = msg.internalDate ?? msg.envelope?.date ?? new Date()
+          const rawDate   = msg.internalDate ?? msg.envelope?.date ?? new Date()
+          const emailDate = rawDate instanceof Date ? rawDate : new Date(rawDate)
           const messageId = msg.envelope?.messageId
             ?? `fallback:${emailDate.toISOString()}:${msg.envelope?.subject ?? ''}`
           if (!messageId || messageId === 'fallback::') continue
@@ -167,7 +168,7 @@ export async function POST(req: Request) {
             content:     bodyText || null,
             source_id:   messageId,
             metadata:    { matched_email: matchedEmail, sync_source: 'manual' },
-            occurred_at: (emailDate instanceof Date ? emailDate : new Date(emailDate)).toISOString(),
+            occurred_at: emailDate.toISOString(),
           })
 
           if (!error) synced++
