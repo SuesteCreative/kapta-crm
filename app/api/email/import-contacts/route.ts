@@ -77,9 +77,12 @@ export async function GET() {
       try { lock = await client.getMailboxLock(path) } catch { continue }
       try {
         const uids: number[] = []
-        for await (const msg of client.fetch('1:*', { uid: true })) uids.push(msg.uid)
+        // Only scan last 6 months to stay within 60s timeout
+        const since = new Date()
+        since.setMonth(since.getMonth() - 6)
+        for await (const msg of client.fetch({ since }, { uid: true })) uids.push(msg.uid)
 
-        const toProcess = uids.reverse().slice(0, 500)
+        const toProcess = uids.reverse().slice(0, 200)
         if (!toProcess.length) continue
 
         for await (const msg of client.fetch(toProcess, { uid: true, envelope: true }, { uid: true })) {
