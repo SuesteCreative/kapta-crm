@@ -105,6 +105,7 @@ ${sigHtml ? `<br><br>${sigHtml}` : ''}
     subject,
     content: textEmail,
     source_id: messageId,
+    metadata: { source: 'crm' },
     occurred_at: new Date().toISOString(),
   })
 

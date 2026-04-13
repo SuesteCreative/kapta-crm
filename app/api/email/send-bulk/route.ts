@@ -97,8 +97,9 @@ export async function POST(request: Request) {
         type: 'email',
         direction: 'outbound',
         subject,
-        content: body,
+        content: textEmail,
         source_id: info.messageId,
+        metadata: { source: 'crm' },
         occurred_at: new Date().toISOString(),
       })
 
