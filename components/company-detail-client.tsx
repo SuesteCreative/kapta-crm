@@ -6,15 +6,36 @@ import Link from 'next/link'
 import {
   Building2, Globe, ArrowLeft, Pencil,
   Mail, MessageSquare, Video, Phone, FileText,
-  Heart, Users, ExternalLink,
+  Heart, Users, ExternalLink, Plus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EditCompanyDialog } from '@/components/edit-company-dialog'
+import { AddInteractionDialog } from '@/components/add-interaction-dialog'
 import {
   cn, STATUS_STYLES, STATUS_LABELS, HEALTH_COLORS, formatDateTime,
 } from '@/lib/utils'
 import type { Company, CustomerWithIdentifiers, Interaction } from '@/lib/database.types'
+
+function cleanContent(raw: string): string {
+  // Strip MIME headers (lines like "Content-Type: ...", boundary markers, etc.)
+  return raw
+    .split('\n')
+    .filter((line) => {
+      const l = line.trim()
+      if (/^--[0-9a-fA-F_=]+/.test(l)) return false
+      if (/^Content-(Type|Transfer-Encoding|Disposition):/i.test(l)) return false
+      if (/^charset=/i.test(l)) return false
+      if (/^boundary=/i.test(l)) return false
+      return true
+    })
+    .join('\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&[a-z]+;/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 const CHANNEL_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
   email:    { icon: Mail,          color: '#3B82F6', bg: 'rgba(59,130,246,0.1)',  label: 'Email'    },
@@ -33,6 +54,8 @@ interface Props {
 export function CompanyDetailClient({ company, customers, interactions }: Props) {
   const router = useRouter()
   const [showEdit, setShowEdit] = useState(false)
+  const [addInteractionFor, setAddInteractionFor] = useState<string | null>(null) // customer_id
+  const [showContactPicker, setShowContactPicker] = useState(false)
 
   // Build a map from customer_id → customer name for the timeline
   const customerMap = Object.fromEntries(customers.map((c) => [c.id, c.name]))
@@ -173,6 +196,35 @@ export function CompanyDetailClient({ company, customers, interactions }: Props)
 
         {/* TIMELINE */}
         <TabsContent value="timeline" className="mt-5 space-y-3">
+          {/* Add interaction button */}
+          <div className="flex justify-end">
+            {!showContactPicker ? (
+              <Button
+                onClick={() => customers.length === 1 ? setAddInteractionFor(customers[0].id) : setShowContactPicker(true)}
+                size="sm"
+                className="h-8 gap-1.5 rounded-lg text-[12.5px] font-medium"
+                style={{ background: 'var(--primary)', color: '#fff' }}
+              >
+                <Plus className="h-3.5 w-3.5" /> Adicionar interação
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <span className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>Para qual contacto?</span>
+                {customers.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => { setShowContactPicker(false); setAddInteractionFor(c.id) }}
+                    className="h-8 px-3 rounded-lg text-[12px] font-medium transition-opacity hover:opacity-80"
+                    style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)', border: '1px solid rgba(91,91,214,0.2)' }}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+                <button onClick={() => setShowContactPicker(false)} className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>Cancelar</button>
+              </div>
+            )}
+          </div>
+
           {interactions.length === 0 ? (
             <div className="rounded-xl p-8 text-center" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
               <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
@@ -229,8 +281,8 @@ export function CompanyDetailClient({ company, customers, interactions }: Props)
                       </span>
                     </div>
                     {i.content && (
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap line-clamp-3" style={{ color: 'var(--muted-foreground)' }}>
-                        {i.content}
+                      <p className="text-sm leading-relaxed line-clamp-3" style={{ color: 'var(--muted-foreground)' }}>
+                        {cleanContent(i.content).slice(0, 300)}
                       </p>
                     )}
                   </div>
@@ -246,6 +298,14 @@ export function CompanyDetailClient({ company, customers, interactions }: Props)
         company={company}
         onClose={() => { setShowEdit(false); router.refresh() }}
       />
+
+      {addInteractionFor && (
+        <AddInteractionDialog
+          open={true}
+          customerId={addInteractionFor}
+          onClose={() => { setAddInteractionFor(null); router.refresh() }}
+        />
+      )}
     </div>
   )
 }
