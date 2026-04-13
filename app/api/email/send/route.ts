@@ -11,6 +11,31 @@ interface RequestBody {
   body: string
 }
 
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&[a-z]+;/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function bodyToHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>')
+}
+
 export async function POST(request: Request) {
   let data: RequestBody
   try {
@@ -25,7 +50,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'customer_id, to, subject, body required' }, { status: 400 })
   }
 
-  // Fetch signature and append if set
+  // Fetch HTML signature
   const supabaseForSig = createServiceClient()
   const { data: sigRow } = await supabaseForSig
     .from('templates')
@@ -33,9 +58,18 @@ export async function POST(request: Request) {
     .eq('type', 'signature')
     .eq('name', '__signature__')
     .maybeSingle()
-  const fullBody = sigRow?.body
-    ? `${body}\n\n--\n${sigRow.body}`
-    : body
+
+  const sigHtml = sigRow?.body ?? null
+  const sigText = sigHtml ? stripHtml(sigHtml) : null
+
+  // Build HTML email: body as HTML + signature
+  const htmlEmail = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#333;max-width:600px;">
+${bodyToHtml(body)}
+${sigHtml ? `<br><br>${sigHtml}` : ''}
+</div>`
+
+  // Plain text fallback
+  const textEmail = sigText ? `${body}\n\n--\n${sigText}` : body
 
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -54,7 +88,8 @@ export async function POST(request: Request) {
       from: process.env.SMTP_USER,
       to,
       subject,
-      text: fullBody,
+      text: textEmail,
+      html: htmlEmail,
     })
     messageId = info.messageId
   } catch (err) {
@@ -62,14 +97,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
   }
 
-  // Log sent email as outbound interaction (store full body with signature)
+  // Log as outbound interaction (store plain text for readability in CRM)
   const supabase = createServiceClient()
   await supabase.from('interactions').insert({
     customer_id,
     type: 'email',
     direction: 'outbound',
     subject,
-    content: fullBody,
+    content: textEmail,
     source_id: messageId,
     occurred_at: new Date().toISOString(),
   })

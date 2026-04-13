@@ -95,7 +95,9 @@ export async function POST(req: Request) {
     .eq('type', 'signature')
     .eq('name', '__signature__')
     .maybeSingle()
-  const signature = sigRow?.body ?? null
+  // Strip HTML from signature so Claude gets plain text instruction
+  const signatureRaw = sigRow?.body ?? null
+  const signature = signatureRaw ? stripHtml(signatureRaw) : null
 
   // Build thread oldest → newest, max 6 emails
   const emailThread = interactions
