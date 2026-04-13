@@ -55,7 +55,6 @@ export async function POST(request: Request) {
   const { data: sigRow } = await supabaseForSig
     .from('templates')
     .select('body')
-    .eq('type', 'signature')
     .eq('name', '__signature__')
     .maybeSingle()
 

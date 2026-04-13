@@ -92,7 +92,6 @@ export async function POST(req: Request) {
   const { data: sigRow } = await supabase
     .from('templates')
     .select('body')
-    .eq('type', 'signature')
     .eq('name', '__signature__')
     .maybeSingle()
   // Strip HTML from signature so Claude gets plain text instruction

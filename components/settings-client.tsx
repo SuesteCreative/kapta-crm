@@ -44,7 +44,6 @@ export function SettingsClient({ initialSignature }: Props) {
       const { data: existing } = await supabase
         .from('templates')
         .select('id')
-        .eq('type', 'signature')
         .eq('name', '__signature__')
         .maybeSingle()
 
@@ -57,7 +56,7 @@ export function SettingsClient({ initialSignature }: Props) {
       } else {
         const { error } = await supabase
           .from('templates')
-          .insert({ name: '__signature__', type: 'signature', subject: null, body: html })
+          .insert({ name: '__signature__', type: 'email', subject: null, body: html })
         if (error) throw error
       }
 

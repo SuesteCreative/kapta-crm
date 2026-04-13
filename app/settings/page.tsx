@@ -7,7 +7,6 @@ export default async function SettingsPage() {
   const { data } = await supabase
     .from('templates')
     .select('body')
-    .eq('type', 'signature')
     .eq('name', '__signature__')
     .maybeSingle()
 
