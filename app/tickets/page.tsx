@@ -6,7 +6,7 @@ import { TicketsClient } from '@/components/tickets-client'
 export default async function TicketsPage() {
   const { data } = await supabase
     .from('tickets')
-    .select('*, customers(id, name, company)')
+    .select('*, customers(id, name, company, plan, status)')
     .order('created_at', { ascending: false })
 
   return <TicketsClient tickets={data ?? []} />

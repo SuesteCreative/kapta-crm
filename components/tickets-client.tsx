@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Copy, Check, Sparkles, Loader2, Users, Mail } from 'lucide-react'
+import { Copy, Check, Sparkles, Loader2, Users, Mail, MessageCircle } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { PRIORITY_STYLES, formatDate } from '@/lib/utils'
@@ -12,7 +12,7 @@ import { toast } from 'sonner'
 import { BulkEmailDialog } from '@/components/bulk-email-dialog'
 import type { Ticket } from '@/lib/database.types'
 
-type TicketWithCustomer = Ticket & { customers: { id: string; name: string; company: string | null } | null }
+type TicketWithCustomer = Ticket & { customers: { id: string; name: string; company: string | null; plan: string | null; status: string | null } | null }
 
 type IssueCluster = {
   issue_title: string
@@ -55,6 +55,36 @@ ${t.tags.length ? `## Tags\n${t.tags.map((tag) => `\`${tag}\``).join(' ')}` : ''
 
 ---
 *${formatDate(t.created_at)} — Kapta CRM*`
+}
+
+function ticketToWhatsApp(t: TicketWithCustomer): string {
+  const priorityEmoji: Record<string, string> = { urgent: '🔴', high: '🟠', medium: '🟡', low: '🟢' }
+  const c = t.customers
+  const lines: string[] = [
+    `${priorityEmoji[t.priority] ?? '⚪'} *[${t.priority.toUpperCase()}] ${t.title}*`,
+    '',
+    `👤 *Cliente:* ${c?.name ?? 'N/A'}${c?.company ? ` (${c.company})` : ''}`,
+  ]
+  if (c?.plan)   lines.push(`📦 *Plataforma:* ${c.plan}`)
+  if (c?.status) lines.push(`📊 *Estado cliente:* ${c.status}`)
+  lines.push(`🎫 *Estado ticket:* ${t.status}`)
+  if (t.description) {
+    lines.push('', `📋 *Descrição:*`, t.description)
+  }
+  if (t.steps_to_reproduce) {
+    lines.push('', `🔁 *Passos para reproduzir:*`, t.steps_to_reproduce)
+  }
+  if (t.actual_behavior) {
+    lines.push('', `❌ *Comportamento atual:*`, t.actual_behavior)
+  }
+  if (t.expected_behavior) {
+    lines.push('', `✅ *Comportamento esperado:*`, t.expected_behavior)
+  }
+  if (t.tags.length > 0) {
+    lines.push('', `🏷️ *Tags:* ${t.tags.join(', ')}`)
+  }
+  lines.push('', `_Kapta CRM · ${formatDate(t.created_at)}_`)
+  return lines.join('\n')
 }
 
 export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
@@ -118,6 +148,13 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
   async function updateStatus(id: string, status: string) {
     await supabase.from('tickets').update({ status }).eq('id', id)
     router.refresh()
+  }
+
+  async function sendToDevTeam(t: TicketWithCustomer) {
+    const msg = ticketToWhatsApp(t)
+    await navigator.clipboard.writeText(msg)
+    toast.success('Mensagem copiada — cola no grupo Kapta Dev Ops 💬')
+    window.open('https://web.whatsapp.com', '_blank')
   }
 
   async function copyTicket(t: TicketWithCustomer) {
@@ -308,6 +345,14 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
                     </SelectContent>
                   </Select>
 
+                  <button
+                    onClick={() => sendToDevTeam(t)}
+                    className="h-7 w-7 flex items-center justify-center rounded-lg transition-colors"
+                    style={{ background: 'rgba(37,211,102,0.12)', color: '#25D366' }}
+                    title="Enviar ao Dev Team (WhatsApp)"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
+                  </button>
                   <button
                     onClick={() => copyTicket(t)}
                     className="h-7 w-7 flex items-center justify-center rounded-lg transition-colors"
