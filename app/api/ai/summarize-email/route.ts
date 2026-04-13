@@ -4,19 +4,11 @@ import Anthropic from '@anthropic-ai/sdk'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const SYSTEM_PROMPT = `És um assistente que resume emails de negócio em português europeu.
+const SYSTEM_PROMPT = `Summarize business email in European Portuguese. Extract 3-5 bullet points.
 
-Dado o conteúdo de um email, extrai os pontos mais importantes em 3-5 bullet points curtos e diretos.
-
-Regras:
-- Cada bullet começa com um verbo de ação ou palavra-chave clara
-- Máximo 12 palavras por bullet
-- Ignora saudações, despedidas, assinaturas e texto boilerplate
-- Foca em: problemas reportados, pedidos feitos, informações importantes, datas ou prazos
-- Escreve em português europeu
-- Retorna APENAS um array JSON de strings, sem markdown, sem explicações
-
-Exemplo: ["Problema com fatura do mês de março", "Pede reembolso de 250€", "Prazo: até sexta-feira"]`
+Rules: action verb or keyword first; max 12 words/bullet; skip greetings/sign-offs/boilerplate; focus on problems, requests, deadlines, key info.
+Return JSON array of strings only. No markdown.
+Example: ["Problema com fatura de março","Pede reembolso de 250€","Prazo: sexta-feira"]`
 
 function stripHtml(html: string): string {
   return html

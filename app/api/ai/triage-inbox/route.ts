@@ -5,22 +5,17 @@ import { createServiceClient } from '@/lib/supabase'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const SYSTEM_PROMPT = `You are an assistant helping a Portuguese business manager named Pedro triage his email inbox inside a CRM called Kapta.
+const SYSTEM_PROMPT = `Triage emails for Pedro, Portuguese B2B account manager at Kapta.
 
-For each email provided, return a JSON object with:
-- customer_id: string (the id provided)
-- priority: "urgent" | "high" | "medium" | "low"
-- category: "suporte" | "comercial" | "financeiro" | "feedback" | "reunião" | "informação" | "outro"
-- summary: string (one sentence in Portuguese, max 15 words — what the person wants)
-- action: string (what Pedro should do, in Portuguese, max 12 words)
+Return JSON array. Each item:
+- customer_id: string
+- priority: "urgent"|"high"|"medium"|"low"
+- category: "suporte"|"comercial"|"financeiro"|"feedback"|"reunião"|"informação"|"outro"
+- summary: string (PT, max 12 words, what client wants)
+- action: string (PT, max 10 words, what Pedro does)
 
-Rules:
-- urgent: client angry, deadline today, service down, contract at risk
-- high: client waiting >3 days, specific question that blocks them, payment issue
-- medium: general question, follow-up, scheduling
-- low: FYI, newsletter, acknowledgement
-
-Return ONLY a valid JSON array, no markdown, no explanation.`
+Priority: urgent=angry/down/contract risk; high=waiting>3d/blocked/payment; medium=question/scheduling; low=FYI/ack.
+JSON array only. No markdown.`
 
 type TriageResult = {
   customer_id: string

@@ -4,24 +4,19 @@ import Anthropic from '@anthropic-ai/sdk'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const SYSTEM_PROMPT = `You are helping a Portuguese B2B account manager create a support ticket based on a customer's email conversation.
+const SYSTEM_PROMPT = `Create support ticket from client email thread. Pedro = Portuguese B2B account manager at Kapta.
 
-Analyze the provided emails and return a JSON object with:
-- title: string (short issue title, max 10 words, starts with a verb in infinitive, in Portuguese)
-- description: string (clear summary of what the customer reported, 2-4 sentences, in Portuguese)
-- steps_to_reproduce: string | null (if the customer described steps, list them; otherwise null)
-- expected_behavior: string | null (what the customer expected; otherwise null)
-- actual_behavior: string | null (what is actually happening; otherwise null)
-- priority: "low" | "medium" | "high" | "urgent"
-- tags: string[] (2-4 relevant tags in Portuguese, lowercase)
+Return JSON:
+- title: string (PT, max 10 words, infinitive verb)
+- description: string (PT, 2-4 sentences, what client reported)
+- steps_to_reproduce: string|null
+- expected_behavior: string|null
+- actual_behavior: string|null
+- priority: "low"|"medium"|"high"|"urgent"
+- tags: string[] (2-4, PT, lowercase)
 
-Priority rules:
-- urgent: system down, data loss, billing error, client threatening to leave
-- high: feature broken, blocking their work, waiting >5 days
-- medium: something not working as expected, question requiring investigation
-- low: minor annoyance, feature request, general question
-
-Return ONLY valid JSON, no markdown, no explanation.`
+Priority: urgent=down/data loss/billing/churn threat; high=broken/blocking/>5d wait; medium=unexpected behavior; low=minor/feature request.
+JSON only. No markdown.`
 
 function stripHtml(html: string): string {
   return html
@@ -67,8 +62,8 @@ ${body}`
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
   const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 512,
     system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     messages: [{
       role: 'user',

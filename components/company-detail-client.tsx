@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -137,7 +137,26 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
 
   const customerMap = Object.fromEntries(customers.map((c) => [c.id, c.name]))
 
-  useEffect(() => { fetchSummary() }, [fetchSummary])
+  const [syncingEmails, setSyncingEmails] = useState(false)
+
+  async function syncEmails() {
+    setSyncingEmails(true)
+    try {
+      const res = await fetch('/api/imap/sync-customer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_ids: customers.map((c) => c.id) }),
+      })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error)
+      toast.success(json.message)
+      if (json.synced > 0) router.refresh()
+    } catch {
+      toast.error('Erro ao sincronizar emails.')
+    } finally {
+      setSyncingEmails(false)
+    }
+  }
 
   // WhatsApp: copy company situation + open WA web
   function sendToWhatsApp() {
@@ -208,11 +227,24 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
               </div>
             </div>
           </div>
-          <Button size="sm" variant="outline" onClick={() => setShowEdit(true)}
-            className="h-8 gap-1.5 rounded-lg text-[12.5px] font-medium shrink-0"
-            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
-            <Pencil className="h-3.5 w-3.5" /> Editar
-          </Button>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={syncEmails}
+              disabled={syncingEmails}
+              title="Sincronizar emails desta empresa"
+              className="h-8 w-8 flex items-center justify-center rounded-lg transition-opacity hover:opacity-70 disabled:opacity-40"
+              style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}
+            >
+              {syncingEmails
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <RefreshCw className="h-3.5 w-3.5" />}
+            </button>
+            <Button size="sm" variant="outline" onClick={() => setShowEdit(true)}
+              className="h-8 gap-1.5 rounded-lg text-[12.5px] font-medium"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
+              <Pencil className="h-3.5 w-3.5" /> Editar
+            </Button>
+          </div>
         </div>
         {company.notes && (
           <div className="mt-4 p-3 rounded-lg text-sm"

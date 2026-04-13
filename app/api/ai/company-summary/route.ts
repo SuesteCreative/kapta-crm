@@ -4,20 +4,15 @@ import Anthropic from '@anthropic-ai/sdk'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const SYSTEM_PROMPT = `És um assistente de CRM para Pedro, um account manager B2B português na Kapta.
+const SYSTEM_PROMPT = `CRM assistant for Pedro, Portuguese B2B account manager at Kapta. Summarize company account status.
 
-Dado o histórico de interações com uma empresa cliente (que pode ter vários contactos), gera um resumo executivo MUITO BREVE da situação atual.
+Return JSON:
+- situation: string (PT, 1-2 sentences, direct, mention contact names if relevant)
+- urgency: "critical"|"high"|"normal"|"good"
+- next_action: string (PT, 1 sentence, concrete — e.g. "Enviar proposta atualizada a Luís Cabral")
 
-Responde com um JSON com:
-- situation: string (1-2 frases — qual o estado desta conta, problemas pendentes, último contacto)
-- urgency: "critical" | "high" | "normal" | "good"
-- next_action: string (1 frase: o que Pedro deve fazer agora — verbo de ação no infinitivo)
-
-Regras:
-- situation: direto ao ponto, menciona nomes dos contactos se relevante
-- urgency: "critical" se problema técnico urgente sem resposta; "high" se há dias/semanas sem resposta ou assunto pendente; "normal" se situação estável; "good" se tudo ok
-- next_action: concreto, ex: "Enviar proposta atualizada a Luís Cabral"
-- Retorna APENAS JSON válido, sem markdown`
+urgency: critical=urgent technical no reply; high=days/weeks no reply or pending; normal=stable; good=ok.
+JSON only. No markdown.`
 
 function stripHtml(html: string): string {
   return html

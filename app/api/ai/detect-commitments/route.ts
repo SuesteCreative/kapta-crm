@@ -5,29 +5,20 @@ import { createServiceClient } from '@/lib/supabase'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const SYSTEM_PROMPT = `És um assistente que analisa interações de Pedro com clientes de uma empresa portuguesa B2B chamada Kapta.
+const SYSTEM_PROMPT = `Find commitments Pedro made to clients (Kapta, Portuguese B2B).
 
-O teu objetivo é identificar compromissos explícitos ou implícitos que Pedro assumiu com clientes, em qualquer canal: email, WhatsApp, reuniões, chamadas ou notas.
+Commitment language: "vou enviar/verificar/ligar", "fico de", "envio amanhã", "ficou acordado", "Pedro ficou de", "I'll send/check/call/follow up", "we agreed".
+Meeting notes use 3rd person: "Pedro ficou de enviar…" — still a commitment.
 
-Exemplos de linguagem de compromisso:
-- Português: "vou enviar", "vou verificar", "fico de", "vou ligar", "envio amanhã", "tratarei de", "falo com a equipa e", "confirmo até", "ficou acordado que", "ficámos de", "Pedro ficou de"
-- Inglês: "I'll send", "I'll check", "I'll call", "I'll follow up", "I'll get back to you", "we agreed that", "I will"
+Return JSON array. Each item:
+- customer_id: string
+- interaction_type: string (email/whatsapp/meeting/call/note)
+- commitment_text: string (PT, max 15 words)
+- suggested_title: string (PT, max 10 words, infinitive verb, e.g. "Enviar proposta atualizada")
+- suggested_priority: "low"|"medium"|"high"|"urgent"
 
-Para cada interação que contenha um compromisso, retorna um objeto JSON com:
-- customer_id: string (o id fornecido)
-- interaction_type: string (o tipo fornecido: email, whatsapp, meeting, call, note)
-- commitment_text: string (frase curta do compromisso em português, max 20 palavras)
-- suggested_title: string (título de follow-up em português, max 10 palavras, começa com verbo no infinitivo, ex: "Enviar proposta atualizada ao cliente")
-- suggested_priority: "low" | "medium" | "high" | "urgent"
-
-Regras de prioridade:
-- urgent: prazo mencionado nos próximos 2 dias, cliente em risco de churn
-- high: prazo esta semana, assunto financeiro ou contratual
-- medium: compromisso geral sem prazo imediato
-- low: follow-up informal, apenas cortesia
-
-Se uma interação não contiver nenhum compromisso claro, não a incluas.
-Retorna APENAS um array JSON válido, sem markdown, sem explicações.`
+Priority: urgent=deadline ≤2d or churn risk; high=this week or financial; medium=general; low=informal.
+Skip interactions with no clear commitment. JSON array only. No markdown.`
 
 type CommitmentResult = {
   customer_id: string
@@ -107,10 +98,10 @@ export async function POST() {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
   const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2048,
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1024,
     system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: `Analisa estas interações e identifica compromissos de Pedro:\n\n${itemsText}` }],
+    messages: [{ role: 'user', content: `Find Pedro's commitments:\n\n${itemsText}` }],
   })
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text : ''

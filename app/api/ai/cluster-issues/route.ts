@@ -5,23 +5,18 @@ import { createServiceClient } from '@/lib/supabase'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const SYSTEM_PROMPT = `És um assistente que agrupa mensagens de clientes de uma empresa portuguesa B2B chamada Kapta.
+const SYSTEM_PROMPT = `Group client messages (email/WhatsApp) from Kapta (Portuguese B2B) by common problem.
 
-O teu objetivo é identificar grupos de mensagens (email ou WhatsApp) que descrevem o mesmo problema ou tema, mesmo que escritas de forma diferente. Foca-te em problemas técnicos, reclamações e pedidos de suporte.
+Focus on technical issues, complaints, support requests. Ignore pleasantries/thanks.
 
-Para cada cluster identificado, retorna:
-- issue_title: string (título claro do problema em português, max 8 palavras)
-- issue_description: string (descrição do problema em 2-3 frases em português)
-- customer_ids: string[] (lista dos customer_ids das mensagens neste grupo)
-- example_summary: string (uma frase que resume o caso mais representativo, em português)
+Return JSON array. Each item:
+- issue_title: string (PT, max 8 words)
+- issue_description: string (PT, 2-3 sentences)
+- customer_ids: string[]
+- example_summary: string (PT, 1 sentence, most representative case)
 
-Regras:
-- Agrupa apenas mensagens com um problema ou tema claramente comum
-- Um cluster deve ter pelo menos 2 clientes para ser relevante
-- Se uma mensagem não se enquadra em nenhum grupo com outro cliente, não a incluas
-- Ignora mensagens de cortesia, agradecimentos, ou atualizações sem problema
-- Retorna APENAS um array JSON válido, sem markdown, sem explicações
-- Se não houver clusters com 2 ou mais clientes, retorna []`
+Rules: cluster only if same clear problem; min 2 customers per cluster; omit singletons.
+If no cluster has ≥2 customers, return []. JSON array only. No markdown.`
 
 type ClusterResult = {
   issue_title: string
@@ -85,10 +80,10 @@ export async function POST() {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
   const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 3000,
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1024,
     system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: `Analisa estas mensagens e agrupa por problema comum:\n\n${itemsText}` }],
+    messages: [{ role: 'user', content: `Group by common issue:\n\n${itemsText}` }],
   })
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text : ''

@@ -65,6 +65,7 @@ export async function GET() {
         for await (const msg of client.fetch(toProcess, {
           uid: true,
           envelope: true,
+          internalDate: true,
           // Plain text body only — no HTML, no attachments, no tracking pixels
           bodyParts: ['1'],  // MIME part 1 = text/plain
         }, { uid: true })) {
@@ -113,7 +114,8 @@ export async function GET() {
           if (!customerId) { unknown++; continue }
 
           const subject = msg.envelope?.subject ?? null
-          const date    = msg.envelope?.date    ?? new Date()
+          const rawDate = msg.internalDate ?? msg.envelope?.date ?? new Date()
+          const date    = rawDate instanceof Date ? rawDate : new Date(rawDate)
 
           // Extract plain text from body part 1
           let bodyText = ''

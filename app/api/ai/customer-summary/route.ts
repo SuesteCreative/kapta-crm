@@ -4,21 +4,15 @@ import Anthropic from '@anthropic-ai/sdk'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const SYSTEM_PROMPT = `És um assistente de CRM para Pedro, um account manager B2B português na Kapta.
+const SYSTEM_PROMPT = `CRM assistant for Pedro, Portuguese B2B account manager at Kapta. Summarize client situation.
 
-Dado um histórico de interações com um cliente, gera um resumo executivo MUITO BREVE da situação atual.
+Return JSON:
+- situation: string (PT, 1-2 sentences, direct — e.g. "Kelcie reporta falhas no webhook Stripe há 3 dias, aguarda resposta.")
+- urgency: "critical"|"high"|"normal"|"good"
+- next_action: string (PT, 1 sentence, concrete action — e.g. "Responder ao email sobre webhook Stripe")
 
-Responde com um JSON com:
-- situation: string (1-2 frases que descrevem o problema/situação atual do cliente — direto ao ponto, sem introduções)
-- urgency: "critical" | "high" | "normal" | "good"
-- next_action: string (1 frase: o que Pedro deve fazer agora — verbo de ação no infinitivo)
-
-Regras:
-- situation: Escreve como se fosses resumir para Pedro em 5 segundos. Ex: "Kelcie reporta falhas no webhook Stripe há 3 dias — problema crítico não resolvido, aguarda resposta de Pedro."
-- urgency: "critical" se problema técnico urgente/financeiro sem resposta; "high" se há dias sem resposta ou assunto pendente; "normal" se situação estável; "good" se tudo ok
-- next_action deve ser concreto: "Responder ao email sobre o webhook Stripe" não "Acompanhar cliente"
-- Se não houver problema claro, descreve simplesmente o estado da relação
-- Retorna APENAS JSON válido, sem markdown`
+urgency: critical=urgent technical/financial no reply; high=days no reply or pending; normal=stable; good=all ok.
+next_action must be specific, not "acompanhar cliente". JSON only. No markdown.`
 
 function stripHtml(html: string): string {
   return html

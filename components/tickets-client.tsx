@@ -10,9 +10,24 @@ import { PRIORITY_STYLES, formatDate } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import { BulkEmailDialog } from '@/components/bulk-email-dialog'
+import { ResolutionEmailDialog } from '@/components/resolution-email-dialog'
 import type { Ticket } from '@/lib/database.types'
 
-type TicketWithCustomer = Ticket & { customers: { id: string; name: string; company: string | null; plan: string | null; status: string | null } | null }
+type CustomerIdentifier = { type: string; value: string; is_primary: boolean }
+type TicketWithCustomer = Ticket & {
+  customers: {
+    id: string; name: string; company: string | null
+    plan: string | null; status: string | null
+    customer_identifiers?: CustomerIdentifier[]
+  } | null
+}
+
+function getPrimaryEmail(t: TicketWithCustomer): string | null {
+  const ids = t.customers?.customer_identifiers ?? []
+  const primary = ids.find((i) => i.type === 'email' && i.is_primary)
+  const any = ids.find((i) => i.type === 'email')
+  return primary?.value ?? any?.value ?? null
+}
 
 type IssueCluster = {
   issue_title: string
@@ -95,6 +110,7 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
   const [clusters,                 setClusters]                 = useState<IssueCluster[]>([])
   const [bulkEmailCluster,         setBulkEmailCluster]         = useState<IssueCluster | null>(null)
   const [creatingTicketForCluster, setCreatingTicketForCluster] = useState<string | null>(null)
+  const [resolutionTicket,         setResolutionTicket]         = useState<{ ticket: TicketWithCustomer; newStatus: string } | null>(null)
 
   const filtered = tickets.filter((t) => {
     if (statusFilter !== 'all' && t.status !== statusFilter) return false
@@ -145,7 +161,17 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
   }
 
   async function updateStatus(id: string, status: string) {
+    if (status === 'resolved' || status === 'closed') {
+      const ticket = tickets.find((t) => t.id === id)
+      if (ticket) { setResolutionTicket({ ticket, newStatus: status }); return }
+    }
     await supabase.from('tickets').update({ status }).eq('id', id)
+    router.refresh()
+  }
+
+  async function commitStatusUpdate(id: string, status: string) {
+    await supabase.from('tickets').update({ status }).eq('id', id)
+    setResolutionTicket(null)
     router.refresh()
   }
 
@@ -428,6 +454,27 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
           open={!!bulkEmailCluster}
           cluster={bulkEmailCluster}
           onClose={() => setBulkEmailCluster(null)}
+        />
+      )}
+
+      {resolutionTicket && (
+        <ResolutionEmailDialog
+          open={!!resolutionTicket}
+          customerId={resolutionTicket.ticket.customers?.id ?? ''}
+          customerName={resolutionTicket.ticket.customers?.name ?? ''}
+          customerCompany={resolutionTicket.ticket.customers?.company ?? null}
+          customerEmail={getPrimaryEmail(resolutionTicket.ticket)}
+          ticket={{
+            title: resolutionTicket.ticket.title,
+            description: resolutionTicket.ticket.description ?? null,
+            actual_behavior: resolutionTicket.ticket.actual_behavior ?? null,
+            expected_behavior: resolutionTicket.ticket.expected_behavior ?? null,
+            steps_to_reproduce: resolutionTicket.ticket.steps_to_reproduce ?? null,
+            tags: resolutionTicket.ticket.tags,
+          }}
+          onSend={() => commitStatusUpdate(resolutionTicket.ticket.id, resolutionTicket.newStatus)}
+          onSkip={() => commitStatusUpdate(resolutionTicket.ticket.id, resolutionTicket.newStatus)}
+          onClose={() => setResolutionTicket(null)}
         />
       )}
     </div>

@@ -28,10 +28,13 @@ interface MappedMessage {
 }
 
 function mapMessages(parsed: ParsedMessage[], ownName: string): MappedMessage[] {
-  const own = ownName.toLowerCase().trim()
+  // Support comma-separated names: "Pedro, Kapta Media"
+  const ownNames = ownName.split(',').map((n) => n.toLowerCase().trim()).filter(Boolean)
   return parsed.map((m) => ({
     ...m,
-    direction: m.sender.toLowerCase().trim() === own ? 'outbound' : 'inbound',
+    direction: ownNames.some((n) => m.sender.toLowerCase().trim() === n || m.sender.toLowerCase().includes(n))
+      ? 'outbound'
+      : 'inbound',
   }))
 }
 
@@ -192,12 +195,12 @@ export function PasteConversationDialog({ open, customerId, onClose }: Props) {
           <div className="flex gap-3 flex-wrap">
             <div className="flex-1 min-w-[140px] space-y-1.5">
               <Label className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>
-                O teu nome (para direção)
+                O teu nome (separar vários por vírgula)
               </Label>
               <Input
                 value={ownName}
                 onChange={(e) => setOwnName(e.target.value)}
-                placeholder="Pedro"
+                placeholder="Pedro, Kapta Media"
                 style={{
                   background: 'var(--muted)',
                   border: '1px solid var(--border)',

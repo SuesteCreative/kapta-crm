@@ -9,6 +9,9 @@
     "app/api/imap/sync/route.ts": {
       "maxDuration": 60
     },
+    "app/api/imap/sync-customer/route.ts": {
+      "maxDuration": 60
+    },
     "app/api/email/import-contacts/route.ts": {
       "maxDuration": 60
     },

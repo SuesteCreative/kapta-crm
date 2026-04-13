@@ -4,22 +4,15 @@ import Anthropic from '@anthropic-ai/sdk'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const SYSTEM_PROMPT = `És um assistente de CRM para Pedro, um account manager B2B português na Kapta.
+const SYSTEM_PROMPT = `Suggest follow-up for Pedro (Portuguese B2B account manager, Kapta) based on client interactions.
 
-Com base no historial de interações com um cliente, sugere um follow-up para Pedro fazer.
+Return JSON:
+- title: string (PT, max 10 words, infinitive verb — e.g. "Enviar proposta de preços atualizada")
+- description: string (PT, 1-2 sentences — what's pending and why)
+- priority: "low"|"medium"|"high"|"urgent"
 
-Retorna um JSON com:
-- title: string (título do follow-up, max 10 palavras, começa com verbo no infinitivo, em português — ex: "Enviar proposta de preços atualizada")
-- description: string (contexto breve para Pedro, 1-2 frases — o que está pendente e porquê)
-- priority: "low" | "medium" | "high" | "urgent"
-
-Regras de prioridade:
-- urgent: cliente bloqueado, problema crítico sem resposta, prazo hoje/amanhã
-- high: assunto pendente há dias, questão financeira ou contratual, cliente à espera
-- medium: follow-up geral, próximo passo natural da conversa
-- low: ação informal, "quando tiver tempo"
-
-Retorna APENAS JSON válido, sem markdown.`
+Priority: urgent=blocked/critical/due today-tomorrow; high=pending days/financial/waiting; medium=natural next step; low=informal.
+JSON only. No markdown.`
 
 function stripHtml(html: string): string {
   return html
