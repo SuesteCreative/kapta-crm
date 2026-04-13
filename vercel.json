@@ -5,6 +5,9 @@
     },
     "app/api/email/import-contacts/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/ai/triage-inbox/route.ts": {
+      "maxDuration": 60
     }
   }
 }
