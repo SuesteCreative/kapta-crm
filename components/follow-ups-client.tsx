@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { CheckCircle2, Circle, AlertTriangle, Clock, CalendarDays } from 'lucide-react'
@@ -11,19 +11,74 @@ import type { FollowUp } from '@/lib/database.types'
 
 type FollowUpWithCustomer = FollowUp & { customers: { id: string; name: string; company: string | null } | null }
 
+type EmailInteraction = {
+  customer_id: string
+  direction: string | null
+  subject: string | null
+  occurred_at: string
+  customers: { id: string; name: string; company: string | null; company_id: string | null } | { id: string; name: string; company: string | null; company_id: string | null }[] | null
+}
+
+type NeedsReplyEntry = {
+  customerId: string
+  name: string
+  company: string | null
+  subject: string | null
+  occurred_at: string
+  daysWaiting: number
+}
+
 const PRIORITY_ORDER = { urgent: 0, high: 1, medium: 2, low: 3 }
 
-export function FollowUpsClient({ followUps }: { followUps: FollowUpWithCustomer[] }) {
+function resolveCustomer(raw: EmailInteraction['customers']): { id: string; name: string; company: string | null } | null {
+  if (!raw) return null
+  if (Array.isArray(raw)) return raw[0] ?? null
+  return raw
+}
+
+export function FollowUpsClient({
+  followUps,
+  emailInteractions = [],
+}: {
+  followUps: FollowUpWithCustomer[]
+  emailInteractions?: EmailInteraction[]
+}) {
   const router = useRouter()
   const params = useSearchParams()
   const [tab, setTab] = useState(params.get('filter') ?? 'open')
 
   const today = new Date().toISOString().split('T')[0]
-  const overdue  = followUps.filter((f) => f.status === 'open' && f.due_date && f.due_date < today)
+  const overdue   = followUps.filter((f) => f.status === 'open' && f.due_date && f.due_date < today)
   const todayItems = followUps.filter((f) => f.status === 'open' && f.due_date === today)
-  const upcoming = followUps.filter((f) => f.status === 'open' && (!f.due_date || f.due_date > today))
-  const done     = followUps.filter((f) => f.status === 'done')
+  const upcoming  = followUps.filter((f) => f.status === 'open' && (!f.due_date || f.due_date > today))
+  const done      = followUps.filter((f) => f.status === 'done')
   const openCount = overdue.length + todayItems.length + upcoming.length
+
+  // Smart "needs reply": per customer, keep only most-recent email interaction.
+  // If that interaction is inbound → customer emailed us, we haven't replied since.
+  const needsReply = useMemo<NeedsReplyEntry[]>(() => {
+    const byCustomer = new Map<string, EmailInteraction>()
+    for (const ei of emailInteractions) {
+      if (!byCustomer.has(ei.customer_id)) byCustomer.set(ei.customer_id, ei)
+    }
+    const now = Date.now()
+    const entries: NeedsReplyEntry[] = []
+    for (const [customerId, ei] of byCustomer) {
+      if (ei.direction !== 'inbound') continue
+      const customer = resolveCustomer(ei.customers)
+      if (!customer) continue
+      const daysWaiting = Math.floor((now - new Date(ei.occurred_at).getTime()) / 86_400_000)
+      entries.push({
+        customerId,
+        name: customer.name,
+        company: customer.company,
+        subject: ei.subject,
+        occurred_at: ei.occurred_at,
+        daysWaiting,
+      })
+    }
+    return entries.sort((a, b) => b.daysWaiting - a.daysWaiting)
+  }, [emailInteractions])
 
   async function toggle(id: string, current: string) {
     const next = current === 'done' ? 'open' : 'done'
@@ -36,6 +91,12 @@ export function FollowUpsClient({ followUps }: { followUps: FollowUpWithCustomer
     router.refresh()
   }
 
+  const tabs = [
+    { key: 'reply',  label: `Sem resposta (${needsReply.length})` },
+    { key: 'open',   label: `Follow-ups (${openCount})` },
+    { key: 'done',   label: `Concluídos (${done.length})` },
+  ]
+
   return (
     <div className="p-7 max-w-[780px] mx-auto space-y-6 animate-fade-in">
 
@@ -45,7 +106,7 @@ export function FollowUpsClient({ followUps }: { followUps: FollowUpWithCustomer
           Follow-ups
         </h1>
         <p className="text-sm mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-          {openCount} abertos · {done.length} concluídos
+          {needsReply.length} sem resposta · {openCount} tarefas abertas · {done.length} concluídas
         </p>
       </div>
 
@@ -54,10 +115,7 @@ export function FollowUpsClient({ followUps }: { followUps: FollowUpWithCustomer
         className="inline-flex rounded-lg p-1 gap-1"
         style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
       >
-        {[
-          { key: 'open', label: `Abertos (${openCount})` },
-          { key: 'done', label: `Concluídos (${done.length})` },
-        ].map(({ key, label }) => (
+        {tabs.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -72,7 +130,59 @@ export function FollowUpsClient({ followUps }: { followUps: FollowUpWithCustomer
         ))}
       </div>
 
-      {/* Open */}
+      {/* Sem resposta */}
+      {tab === 'reply' && (
+        <div className="space-y-2">
+          {needsReply.length === 0 ? (
+            <div className="rounded-xl p-8 text-center" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
+              <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                Sem emails por responder. Sincroniza o email primeiro para ver aqui.
+              </p>
+            </div>
+          ) : (
+            needsReply.map((entry) => (
+              <Link
+                key={entry.customerId}
+                href={`/customers/${entry.customerId}`}
+                className="flex items-start gap-3 rounded-xl p-4 transition-opacity hover:opacity-80"
+                style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', display: 'flex' }}
+              >
+                {/* urgency dot */}
+                <div
+                  className="mt-1 w-2 h-2 rounded-full shrink-0"
+                  style={{ background: entry.daysWaiting >= 7 ? 'var(--status-churned)' : entry.daysWaiting >= 3 ? '#F59E0B' : '#2DB975' }}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+                    {entry.name}
+                    {entry.company && (
+                      <span className="ml-2 text-xs font-normal" style={{ color: 'var(--muted-foreground)' }}>
+                        {entry.company}
+                      </span>
+                    )}
+                  </p>
+                  {entry.subject && (
+                    <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted-foreground)' }}>
+                      {entry.subject}
+                    </p>
+                  )}
+                </div>
+                <span
+                  className="text-[11px] font-medium shrink-0 rounded-full px-2 py-0.5"
+                  style={{
+                    background: entry.daysWaiting >= 7 ? 'rgba(239,68,68,0.1)' : entry.daysWaiting >= 3 ? 'rgba(245,158,11,0.1)' : 'rgba(45,185,117,0.1)',
+                    color: entry.daysWaiting >= 7 ? 'var(--status-churned)' : entry.daysWaiting >= 3 ? '#F59E0B' : '#2DB975',
+                  }}
+                >
+                  {entry.daysWaiting === 0 ? 'hoje' : `${entry.daysWaiting}d`}
+                </span>
+              </Link>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Open follow-ups */}
       {tab === 'open' && (
         <div className="space-y-6">
           {openCount === 0 && (
@@ -80,9 +190,9 @@ export function FollowUpsClient({ followUps }: { followUps: FollowUpWithCustomer
               <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>Sem follow-ups abertos. 🎉</p>
             </div>
           )}
-          <Section items={overdue}    label="Atrasados"  icon={AlertTriangle} color="var(--status-churned)"    onToggle={toggle} />
-          <Section items={todayItems} label="Para hoje"  icon={Clock}         color="#F59E0B"                   onToggle={toggle} />
-          <Section items={upcoming}   label="Próximos"   icon={CalendarDays}  color="var(--muted-foreground)"  onToggle={toggle} />
+          <Section items={overdue}    label="Atrasados"  icon={AlertTriangle} color="var(--status-churned)"   onToggle={toggle} />
+          <Section items={todayItems} label="Para hoje"  icon={Clock}         color="#F59E0B"                  onToggle={toggle} />
+          <Section items={upcoming}   label="Próximos"   icon={CalendarDays}  color="var(--muted-foreground)" onToggle={toggle} />
         </div>
       )}
 
