@@ -14,6 +14,25 @@ export const dynamic = 'force-dynamic'
  * - Skips Spam/Junk/Trash automatically
  * - Treats the entire sending domain (e.g. @kapta.pt) as internal
  */
+/** Extract original sender email from a forwarded email body.
+ *  Handles Gmail, Outlook, Apple Mail forward formats. */
+function extractForwardedSender(body: string): { email: string; name: string } | null {
+  // Patterns: "From: Name <email>" or "From: email"
+  const patterns = [
+    /^From:\s+(?:"?([^"<\r\n]+?)"?\s+)?<([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})>/im,
+    /^From:\s+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/im,
+  ]
+  for (const pattern of patterns) {
+    const match = body.match(pattern)
+    if (match) {
+      const name  = match[1]?.trim() ?? ''
+      const email = (match[2] ?? match[1])?.toLowerCase().trim()
+      if (email?.includes('@')) return { email, name }
+    }
+  }
+  return null
+}
+
 export async function GET() {
   const supabase = createServiceClient()
 
@@ -191,9 +210,17 @@ export async function GET() {
             }
           }
 
-          // ── Reply-To fallback for team forwards (FROM=@kapta.pt, TO=@kapta.pt) ──
-          // e.g. bruno@kapta.pt or site@kapta.pt forwarding a customer email to Pedro
+          // Read body early — needed for forward parsing fallback
+          let bodyText = ''
+          if (msg.bodyParts) {
+            const part = msg.bodyParts.get('1')
+            if (part) bodyText = part.toString('utf8').trim().slice(0, 4000)
+          }
+
+          // ── Fallback for team forwards (FROM=@kapta.pt, TO=@kapta.pt) ──
+          // Try Reply-To first, then parse forwarded body (Gmail/Outlook/Apple Mail)
           if (!customerId && effectiveDirection === 'outbound') {
+            // 1. Reply-To header
             const replyTo = msg.envelope?.replyTo ?? []
             for (const addr of replyTo) {
               if (!addr.address) continue
@@ -206,7 +233,21 @@ export async function GET() {
               const found = emailToCustomerId.get(email)
               if (found) { customerId = found; matchedEmail = email; break }
             }
-            // If still no match, auto-create lead from Reply-To
+
+            // 2. Parse forwarded body: "From: Name <email>" pattern
+            if (!customerId && bodyText) {
+              const fwd = extractForwardedSender(bodyText)
+              if (fwd && !isInternal(fwd.email)) {
+                if (!primarySenderEmail) {
+                  primarySenderEmail = fwd.email
+                  primarySenderName  = fwd.name || fwd.email.split('@')[0]
+                }
+                const found = emailToCustomerId.get(fwd.email)
+                if (found) { customerId = found; matchedEmail = fwd.email }
+              }
+            }
+
+            // 3. Auto-create lead if we found an external email but no customer yet
             if (!customerId && primarySenderEmail) {
               const senderName = primarySenderName || primarySenderEmail.split('@')[0]
               const { data: newCustomer, error: insertErr } = await supabase
@@ -234,12 +275,6 @@ export async function GET() {
           const subject = msg.envelope?.subject ?? null
           const rawDate = msg.internalDate ?? msg.envelope?.date ?? new Date()
           const date    = rawDate instanceof Date ? rawDate : new Date(rawDate)
-
-          let bodyText = ''
-          if (msg.bodyParts) {
-            const part = msg.bodyParts.get('1')
-            if (part) bodyText = part.toString('utf8').trim().slice(0, 4000)
-          }
 
           buffer.push({
             customer_id: customerId,
