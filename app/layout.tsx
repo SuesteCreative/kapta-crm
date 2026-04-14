@@ -26,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {children}
           </main>
         </div>
-        <Toaster richColors position="top-right" />
+        <Toaster richColors position="top-right" closeButton duration={6000} />
       </body>
     </html>
   )

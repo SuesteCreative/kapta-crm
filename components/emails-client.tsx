@@ -46,20 +46,22 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
     setSyncing(true)
     try {
       const res  = await fetch('/api/imap/sync')
-      const data = await res.json()
+      const text = await res.text()
+      let data: Record<string, unknown>
+      try { data = JSON.parse(text) } catch { throw new Error(`Resposta inválida (HTTP ${res.status}): ${text.slice(0, 200)}`) }
       localStorage.setItem('lastEmailSync', String(Date.now()))
       if (data.ok) {
-        if (data.synced > 0) {
-          if (!silent) toast.success(`${data.synced} email(s) importados`)
+        if ((data.synced as number) > 0) {
+          if (!silent) toast.success(`${data.synced} email(s) importados · ${data.created_leads ?? 0} novos leads`, { duration: Infinity })
           router.refresh()
         } else {
-          if (!silent) toast.success('Sem novos emails')
+          if (!silent) toast.success('Sem novos emails', { duration: Infinity })
         }
       } else {
-        if (!silent) toast.error('Erro ao sincronizar', { description: data.error })
+        if (!silent) toast.error('Erro ao sincronizar', { description: data.error as string, duration: Infinity })
       }
     } catch (e) {
-      if (!silent) toast.error('Erro ao sincronizar', { description: String(e) })
+      if (!silent) toast.error('Erro ao sincronizar', { description: String(e), duration: Infinity })
     } finally {
       setSyncing(false)
     }
