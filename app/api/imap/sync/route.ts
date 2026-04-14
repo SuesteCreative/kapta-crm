@@ -9,10 +9,10 @@ export const dynamic = 'force-dynamic'
  * - Reads email metadata + plain-text only (no HTML, no images, no attachments)
  * - Never marks emails as read, never clicks links, never loads remote content
  * - Matches known customers OR auto-creates leads for new inbound senders
- * - Deduplicates by Message-ID so re-syncing is safe
+ * - Deduplicates by Message-ID — pre-loaded into a Set (no N+1 queries)
+ * - Batch-inserts new interactions (no N+1 on inserts)
  * - Skips Spam/Junk/Trash automatically
  * - Treats the entire sending domain (e.g. @kapta.pt) as internal
- * - Pre-loads all customer identifiers into a Map — no N+1 queries
  */
 export async function GET() {
   const supabase = createServiceClient()
@@ -25,7 +25,7 @@ export async function GET() {
     return e === imapUser || (ownDomain.length > 0 && e.endsWith('@' + ownDomain))
   }
 
-  // ── Pre-load ALL email identifiers once — avoids N+1 in the email loop ──
+  // ── Pre-load ALL email identifiers once ──
   const { data: allIdentifiers } = await supabase
     .from('customer_identifiers')
     .select('value, customer_id')
@@ -34,6 +34,17 @@ export async function GET() {
   const emailToCustomerId = new Map<string, string>()
   for (const id of allIdentifiers ?? []) {
     emailToCustomerId.set(id.value.toLowerCase().trim(), id.customer_id)
+  }
+
+  // ── Pre-load ALL existing source_ids — eliminates N+1 dedup queries ──
+  const { data: existingRows } = await supabase
+    .from('interactions')
+    .select('source_id')
+    .not('source_id', 'is', null)
+
+  const existingSourceIds = new Set<string>()
+  for (const row of existingRows ?? []) {
+    if (row.source_id) existingSourceIds.add(row.source_id)
   }
 
   const client = new ImapFlow({
@@ -52,6 +63,26 @@ export async function GET() {
   let skipped = 0
   let unknown = 0
   let created = 0
+
+  // Batch buffer — flushed every 50 rows
+  type NewInteraction = {
+    customer_id: string
+    type: 'email'
+    direction: 'inbound' | 'outbound'
+    subject: string | null
+    content: string | null
+    source_id: string
+    metadata: Record<string, unknown>
+    occurred_at: string
+  }
+  const buffer: NewInteraction[] = []
+
+  async function flushBuffer() {
+    if (buffer.length === 0) return
+    const chunk = buffer.splice(0, buffer.length)
+    const { error } = await supabase.from('interactions').insert(chunk)
+    if (!error) synced += chunk.length
+  }
 
   try {
     await client.connect()
@@ -88,15 +119,11 @@ export async function GET() {
           const messageId = msg.envelope?.messageId
           if (!messageId) continue
 
-          // ── Deduplication ──
-          const { data: existing } = await supabase
-            .from('interactions')
-            .select('id')
-            .eq('source_id', messageId)
-            .maybeSingle()
-          if (existing) { skipped++; continue }
+          // ── Deduplication — O(1) Set lookup, no DB query ──
+          if (existingSourceIds.has(messageId)) { skipped++; continue }
+          existingSourceIds.add(messageId) // prevent dupes within this run
 
-          // ── Resolve customer via Map (no DB query per email) ──
+          // ── Resolve customer ──
           const addresses =
             direction === 'inbound'
               ? [...(msg.envelope?.from ?? []), ...(msg.envelope?.cc ?? [])]
@@ -142,7 +169,6 @@ export async function GET() {
                 value:       primarySenderEmail,
                 is_primary:  true,
               })
-              // Register new identifier in Map so subsequent emails from same sender match
               emailToCustomerId.set(primarySenderEmail, newCustomer.id)
               customerId   = newCustomer.id
               matchedEmail = primarySenderEmail
@@ -162,7 +188,7 @@ export async function GET() {
             if (part) bodyText = part.toString('utf8').trim().slice(0, 4000)
           }
 
-          const { error } = await supabase.from('interactions').insert({
+          buffer.push({
             customer_id: customerId,
             type:        'email',
             direction,
@@ -173,8 +199,11 @@ export async function GET() {
             occurred_at: date.toISOString(),
           })
 
-          if (!error) synced++
+          // Flush every 50
+          if (buffer.length >= 50) await flushBuffer()
         }
+
+        await flushBuffer()
       } finally {
         lock.release()
       }
