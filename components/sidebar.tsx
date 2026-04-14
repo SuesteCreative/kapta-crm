@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Users, CalendarCheck, Ticket,
-  FileText, RefreshCw, ChevronRight, Loader2, Building2, Settings, Mail,
+  FileText, RefreshCw, ChevronRight, Loader2, Building2, Settings, Mail, LogOut,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -24,6 +24,8 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const [syncing, setSyncing] = useState(false)
+
+  if (pathname === '/login') return null
 
   // Auto-sync on app open — but at most once every 10 minutes
   useEffect(() => {
@@ -149,15 +151,28 @@ export function Sidebar() {
         </button>
 
         <div
-          className="px-3 py-2.5 rounded-md mt-1"
+          className="px-3 py-2.5 rounded-md mt-1 flex items-center justify-between"
           style={{ background: 'rgba(255,255,255,0.04)' }}
         >
-          <p className="text-[11px] font-medium" style={{ color: 'var(--sidebar-muted)' }}>
-            Pedro
-          </p>
-          <p className="text-[10px] truncate mt-0.5" style={{ color: 'var(--sidebar-muted)' }}>
-            pedro@kapta.pt
-          </p>
+          <div>
+            <p className="text-[11px] font-medium" style={{ color: 'var(--sidebar-muted)' }}>
+              Pedro
+            </p>
+            <p className="text-[10px] truncate mt-0.5" style={{ color: 'var(--sidebar-muted)' }}>
+              pedro@kapta.pt
+            </p>
+          </div>
+          <button
+            onClick={async () => {
+              await fetch('/api/auth/logout', { method: 'POST' })
+              router.push('/login')
+            }}
+            title="Sair"
+            className="p-1 rounded opacity-50 hover:opacity-100 transition-opacity"
+            style={{ color: 'var(--sidebar-muted)' }}
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
     </aside>

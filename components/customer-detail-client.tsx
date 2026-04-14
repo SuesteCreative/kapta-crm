@@ -586,6 +586,23 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                       )
                     })()}
 
+                    {/* Images */}
+                    {Array.isArray((i.metadata as Record<string, unknown> | null)?.images) &&
+                      ((i.metadata as Record<string, unknown>).images as string[]).length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {((i.metadata as Record<string, unknown>).images as string[]).map((url, idx) => (
+                          <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                            <img
+                              src={url}
+                              alt=""
+                              className="rounded-lg object-cover hover:opacity-90 transition-opacity cursor-pointer"
+                              style={{ width: 120, height: 90 }}
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Bubbles embed */}
                     {i.bubbles_url && (
                       <div

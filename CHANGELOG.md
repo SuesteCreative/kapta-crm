@@ -4,6 +4,14 @@
 
 ## [Unreleased] — Abril 2026
 
+### Autenticação simples (sem Clerk)
+- Login com email + password (`pedro@kapta.pt`)
+- `proxy.ts` (Next.js 16 — substitui `middleware.ts`) protege todas as rotas
+- Sessão em cookie `kapta_session` httpOnly, 30 dias
+- Password guardada como HMAC-SHA256 em `.env.local` (nunca em texto simples)
+- Botão de logout na sidebar
+- Página `/login` com design Obsidian Office
+
 ### Seletor de Idioma no Rascunho IA
 - Botão PT / EN ao lado de "Gerar resposta com IA" no diálogo de email
 - PT: Português europeu, "Olá [Nome]", "Com os melhores cumprimentos, Pedro"
