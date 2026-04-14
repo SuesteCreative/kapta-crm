@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Mail, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -34,13 +34,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [dirFilter, setDirFilter]     = useState<string | null>(null)
   const [syncing, setSyncing]         = useState(false)
 
-  // Auto-sync on mount if last sync > 5 min ago
-  useEffect(() => {
-    const INTERVAL_MS = 5 * 60 * 1000
-    const last = Number(localStorage.getItem('lastEmailSync') ?? 0)
-    if (Date.now() - last > INTERVAL_MS) syncNow(true)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // Auto-sync removed — sidebar handles global auto-sync to avoid concurrent requests
 
   async function syncNow(silent = false) {
     setSyncing(true)

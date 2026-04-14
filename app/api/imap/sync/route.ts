@@ -37,10 +37,12 @@ export async function GET() {
   }
 
   // ── Pre-load ALL existing source_ids — eliminates N+1 dedup queries ──
+  // .range() is required: Supabase JS v2 caps .select() at 1000 rows by default
   const { data: existingRows } = await supabase
     .from('interactions')
     .select('source_id')
     .not('source_id', 'is', null)
+    .range(0, 99999)
 
   const existingSourceIds = new Set<string>()
   for (const row of existingRows ?? []) {
@@ -80,7 +82,11 @@ export async function GET() {
   async function flushBuffer() {
     if (buffer.length === 0) return
     const chunk = buffer.splice(0, buffer.length)
-    const { error } = await supabase.from('interactions').insert(chunk)
+    // upsert with ignoreDuplicates = ON CONFLICT (source_id) DO NOTHING
+    // requires unique constraint on source_id — safe to call even before constraint exists
+    const { error } = await supabase
+      .from('interactions')
+      .upsert(chunk, { onConflict: 'source_id', ignoreDuplicates: true })
     if (!error) synced += chunk.length
   }
 
@@ -182,6 +188,44 @@ export async function GET() {
               customerId   = newCustomer.id
               matchedEmail = primarySenderEmail
               created++
+            }
+          }
+
+          // ── Reply-To fallback for team forwards (FROM=@kapta.pt, TO=@kapta.pt) ──
+          // e.g. bruno@kapta.pt or site@kapta.pt forwarding a customer email to Pedro
+          if (!customerId && effectiveDirection === 'outbound') {
+            const replyTo = msg.envelope?.replyTo ?? []
+            for (const addr of replyTo) {
+              if (!addr.address) continue
+              const email = addr.address.toLowerCase().trim()
+              if (isInternal(email)) continue
+              if (!primarySenderEmail) {
+                primarySenderEmail = email
+                primarySenderName  = addr.name?.trim() || email.split('@')[0]
+              }
+              const found = emailToCustomerId.get(email)
+              if (found) { customerId = found; matchedEmail = email; break }
+            }
+            // If still no match, auto-create lead from Reply-To
+            if (!customerId && primarySenderEmail) {
+              const senderName = primarySenderName || primarySenderEmail.split('@')[0]
+              const { data: newCustomer, error: insertErr } = await supabase
+                .from('customers')
+                .insert({ name: senderName, status: 'onboarding', health_score: 3 })
+                .select('id')
+                .single()
+              if (!insertErr && newCustomer) {
+                await supabase.from('customer_identifiers').insert({
+                  customer_id: newCustomer.id,
+                  type: 'email',
+                  value: primarySenderEmail,
+                  is_primary: true,
+                })
+                emailToCustomerId.set(primarySenderEmail, newCustomer.id)
+                customerId   = newCustomer.id
+                matchedEmail = primarySenderEmail
+                created++
+              }
             }
           }
 
