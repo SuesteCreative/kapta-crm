@@ -15,12 +15,12 @@ export const dynamic = 'force-dynamic'
  * - Treats the entire sending domain (e.g. @kapta.pt) as internal
  */
 /** Extract original sender email from a forwarded email body.
- *  Handles Gmail, Outlook, Apple Mail forward formats. */
+ *  Handles Gmail, Outlook, Apple Mail (incl. "> From:" quoted lines). */
 function extractForwardedSender(body: string): { email: string; name: string } | null {
-  // Patterns: "From: Name <email>" or "From: email"
+  // Match "From:" at line start, optionally preceded by ">" quote chars and spaces
   const patterns = [
-    /^From:\s+(?:"?([^"<\r\n]+?)"?\s+)?<([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})>/im,
-    /^From:\s+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/im,
+    /^[>\s]*From:\s+(?:"?([^"<\r\n]+?)"?\s+)?<([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})>/im,
+    /^[>\s]*From:\s+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/im,
   ]
   for (const pattern of patterns) {
     const match = body.match(pattern)
