@@ -123,9 +123,18 @@ export async function GET() {
           if (existingSourceIds.has(messageId)) { skipped++; continue }
           existingSourceIds.add(messageId) // prevent dupes within this run
 
-          // ── Resolve customer ──
+          // ── Resolve direction + customer ──
+          // If inbox email is FROM a team member (@kapta.pt), treat as outbound
+          // and look at TO for the customer — e.g. Bruno forwarding or CC'ing Pedro
+          const fromAddrs = msg.envelope?.from ?? []
+          const allFromAreTeam = fromAddrs.length > 0 &&
+            fromAddrs.every(a => !a.address || isInternal(a.address.toLowerCase().trim()))
+
+          const effectiveDirection: 'inbound' | 'outbound' =
+            direction === 'inbound' && allFromAreTeam ? 'outbound' : direction
+
           const addresses =
-            direction === 'inbound'
+            effectiveDirection === 'inbound'
               ? [...(msg.envelope?.from ?? []), ...(msg.envelope?.cc ?? [])]
               : [...(msg.envelope?.to ?? []), ...(msg.envelope?.cc ?? [])]
 
@@ -153,7 +162,7 @@ export async function GET() {
           }
 
           // ── Auto-create lead for unknown inbound senders ──
-          if (!customerId && direction === 'inbound' && primarySenderEmail) {
+          if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail) {
             const senderName = primarySenderName || primarySenderEmail.split('@')[0]
 
             const { data: newCustomer, error: insertErr } = await supabase
@@ -191,7 +200,7 @@ export async function GET() {
           buffer.push({
             customer_id: customerId,
             type:        'email',
-            direction,
+            direction:   effectiveDirection,
             subject,
             content:     bodyText || null,
             source_id:   messageId,
