@@ -29,6 +29,14 @@ function stripHtml(html: string): string {
     .trim()
 }
 
+type AttachmentMeta = { name: string; ai_summary?: string }
+
+function withAttachments(text: string, metadata: Record<string, unknown> | null | undefined): string {
+  const atts = (metadata?.attachments as AttachmentMeta[] | undefined) ?? []
+  if (atts.length === 0) return text
+  return `${text}\n[Attachments: ${atts.map((a) => `${a.name}: ${a.ai_summary ?? a.name}`).join(' | ')}]`
+}
+
 type SuggestRequest = {
   customer_name: string
   customer_company: string | null
@@ -38,6 +46,7 @@ type SuggestRequest = {
     subject: string | null
     content: string | null
     occurred_at: string
+    metadata?: Record<string, unknown> | null
   }>
 }
 
@@ -53,7 +62,10 @@ export async function POST(req: Request) {
   // Build conversation thread — most relevant first
   const thread = interactions.slice(0, 8).map((i) => {
     const direction = i.direction === 'inbound' ? `${customer_name} escreveu` : 'Pedro respondeu'
-    const body = i.content ? stripHtml(i.content).slice(0, 500) : '(sem conteúdo)'
+    const body = withAttachments(
+      i.content ? stripHtml(i.content).slice(0, 500) : '(sem conteúdo)',
+      i.metadata
+    )
     return `[${new Date(i.occurred_at).toLocaleDateString('pt-PT')} — ${direction}]
 Assunto: ${i.subject ?? '(sem assunto)'}
 ${body}`

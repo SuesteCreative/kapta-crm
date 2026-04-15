@@ -6,7 +6,7 @@ import {
   Mail, MessageSquare, Video,
   Plus, ExternalLink, Heart, Building2, Tag,
   CheckCircle2, Circle, Pencil, ArrowLeft, ClipboardPaste,
-  Sparkles, Loader2, ChevronDown, ChevronUp, RefreshCw, Trash2,
+  Sparkles, Loader2, ChevronDown, ChevronUp, RefreshCw, Trash2, Paperclip,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -108,13 +108,18 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
     })
   }, [])
 
-  const summarizeEmail = useCallback(async (id: string, content: string, subject: string | null) => {
+  const summarizeEmail = useCallback(async (
+    id: string,
+    content: string,
+    subject: string | null,
+    attachments?: Array<{ name: string; ai_summary?: string }>,
+  ) => {
     setSummarizing((prev) => new Set([...prev, id]))
     try {
       const res = await fetch('/api/ai/summarize-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, subject }),
+        body: JSON.stringify({ content, subject, attachments: attachments ?? [] }),
       })
       const text = await res.text()
       let json: { ok: boolean; bullets?: string[]; error?: string }
@@ -571,7 +576,10 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                             )}
                             {isEmail && !bullets && (
                               <button
-                                onClick={() => summarizeEmail(i.id, i.content!, i.subject)}
+                                onClick={() => summarizeEmail(
+                                  i.id, i.content!, i.subject,
+                                  ((i.metadata as Record<string, unknown> | null)?.attachments as Array<{ name: string; ai_summary?: string }> | undefined)
+                                )}
                                 disabled={isSummarizing}
                                 className="flex items-center gap-1 text-[11px] font-medium transition-opacity hover:opacity-70"
                                 style={{ color: 'var(--muted-foreground)' }}
@@ -600,6 +608,51 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                             />
                           </a>
                         ))}
+                      </div>
+                    )}
+
+                    {/* File attachments */}
+                    {Array.isArray((i.metadata as Record<string, unknown> | null)?.attachments) &&
+                      ((i.metadata as Record<string, unknown>).attachments as Array<{ name: string; mime: string; size: number; url: string | null; ai_summary?: string }>).length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {((i.metadata as Record<string, unknown>).attachments as Array<{ name: string; mime: string; size: number; url: string | null; ai_summary?: string }>).map((att, idx) => {
+                          const isImage = att.mime.startsWith('image/')
+                          if (isImage && att.url) {
+                            return (
+                              <a key={idx} href={att.url} target="_blank" rel="noopener noreferrer" title={att.ai_summary ?? att.name}>
+                                <img
+                                  src={att.url}
+                                  alt={att.name}
+                                  className="rounded-lg object-cover hover:opacity-90 transition-opacity cursor-pointer"
+                                  style={{ width: 120, height: 90 }}
+                                />
+                              </a>
+                            )
+                          }
+                          return (
+                            <a
+                              key={idx}
+                              href={att.url ?? undefined}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={att.ai_summary ?? att.name}
+                              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-opacity hover:opacity-70"
+                              style={{
+                                background: 'var(--muted)',
+                                border: '1px solid var(--border)',
+                                color: att.url ? 'var(--foreground)' : 'var(--muted-foreground)',
+                                cursor: att.url ? 'pointer' : 'default',
+                                textDecoration: 'none',
+                              }}
+                            >
+                              <Paperclip className="h-3 w-3 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
+                              <span className="max-w-[160px] truncate">{att.name}</span>
+                              <span style={{ color: 'var(--muted-foreground)' }}>
+                                {att.size > 0 ? `${(att.size / 1024).toFixed(0)} KB` : ''}
+                              </span>
+                            </a>
+                          )
+                        })}
                       </div>
                     )}
 

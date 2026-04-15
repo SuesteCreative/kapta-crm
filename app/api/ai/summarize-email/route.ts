@@ -25,14 +25,24 @@ function stripHtml(html: string): string {
     .trim()
 }
 
+type AttachmentMeta = { name: string; ai_summary?: string }
+
 export async function POST(req: Request) {
-  const { content, subject } = await req.json() as { content: string; subject?: string }
+  const { content, subject, attachments } = await req.json() as {
+    content: string
+    subject?: string
+    attachments?: AttachmentMeta[]
+  }
 
   if (!content || content.trim().length < 20) {
     return NextResponse.json({ ok: false, error: 'Conteúdo insuficiente.' }, { status: 400 })
   }
 
-  const cleaned = stripHtml(content).slice(0, 2000)
+  let cleaned = stripHtml(content).slice(0, 2000)
+  if (attachments && attachments.length > 0) {
+    const attLine = attachments.map((a) => `${a.name}: ${a.ai_summary ?? a.name}`).join(' | ')
+    cleaned += `\n[Attachments: ${attLine}]`
+  }
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 

@@ -71,7 +71,7 @@ export async function POST() {
   const batchIds = needsReply.slice(0, 15).map((e) => e.id)
   const { data: batchWithContent } = await supabase
     .from('interactions')
-    .select('id, customer_id, direction, subject, content, occurred_at, customers(id, name, company)')
+    .select('id, customer_id, direction, subject, content, metadata, occurred_at, customers(id, name, company)')
     .in('id', batchIds)
 
   const batch = batchWithContent ?? needsReply.slice(0, 15)
@@ -81,7 +81,10 @@ export async function POST() {
     const customer = Array.isArray(e.customers) ? e.customers[0] : e.customers
     const name = customer ? `${customer.name}${customer.company ? ` (${customer.company})` : ''}` : 'Desconhecido'
     const rawBody = ('content' in e && e.content) ? (e.content as string) : ''
-    const body = rawBody ? stripHtml(rawBody).slice(0, 400) : '(sem corpo)'
+    let body = rawBody ? stripHtml(rawBody).slice(0, 400) : '(sem corpo)'
+    const meta = ('metadata' in e && e.metadata) ? (e.metadata as Record<string, unknown>) : null
+    const atts = (meta?.attachments as Array<{ name: string; ai_summary?: string }> | undefined) ?? []
+    if (atts.length > 0) body += ` [Attachments: ${atts.map((a) => `${a.name}: ${a.ai_summary ?? a.name}`).join(' | ')}]`
     return JSON.stringify({
       customer_id: e.customer_id,
       from: name,

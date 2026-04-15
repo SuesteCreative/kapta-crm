@@ -66,6 +66,15 @@ function stripHtml(html: string): string {
     .trim()
 }
 
+type AttachmentMeta = { name: string; ai_summary?: string; mime?: string }
+
+function withAttachments(text: string, metadata: Record<string, unknown> | null | undefined): string {
+  const atts = (metadata?.attachments as AttachmentMeta[] | undefined) ?? []
+  if (atts.length === 0) return text
+  const attLine = atts.map((a) => `${a.name}: ${a.ai_summary ?? a.mime ?? a.name}`).join(' | ')
+  return `${text}\n[Attachments: ${attLine}]`
+}
+
 type DraftRequest = {
   customer_name: string
   customer_company: string | null
@@ -76,6 +85,7 @@ type DraftRequest = {
     subject: string | null
     content: string | null
     occurred_at: string
+    metadata?: Record<string, unknown> | null
   }>
 }
 
@@ -107,7 +117,10 @@ export async function POST(req: Request) {
       const who = i.direction === 'inbound'
         ? `${customer_name}${customer_company ? ` (${customer_company})` : ''}`
         : 'Pedro (eu)'
-      const text = i.content ? stripHtml(i.content).slice(0, 600) : '(sem conteúdo)'
+      const text = withAttachments(
+        i.content ? stripHtml(i.content).slice(0, 600) : '(sem conteúdo)',
+        i.metadata
+      )
       return `[${new Date(i.occurred_at).toLocaleDateString('pt-PT')} — ${who}]
 Assunto: ${i.subject ?? '(sem assunto)'}
 ${text}`

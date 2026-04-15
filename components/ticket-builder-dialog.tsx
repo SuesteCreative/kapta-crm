@@ -80,6 +80,7 @@ export function TicketBuilderDialog({ open, customer, interactions = [], onClose
               subject: i.subject,
               content: i.content,
               occurred_at: i.occurred_at,
+              metadata: i.metadata ?? null,
             })),
           }),
         })

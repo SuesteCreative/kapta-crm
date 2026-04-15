@@ -1,8 +1,39 @@
 import { NextResponse } from 'next/server'
 import { ImapFlow } from 'imapflow'
 import { createServiceClient } from '@/lib/supabase'
+import { analyzeAttachment } from '@/lib/analyze-attachment'
+import { randomUUID } from 'crypto'
 
 export const dynamic = 'force-dynamic'
+
+const ATTACH_BUCKET = 'email-attachments'
+const ATTACH_MAX_BYTES   = 15 * 1024 * 1024 // skip download > 15 MB
+const ATTACH_MAX_ANALYZE =  5 * 1024 * 1024 // skip AI analysis > 5 MB
+
+type AttachmentMeta = { name: string; mime: string; size: number; url: string | null; ai_summary: string }
+
+/** Walk IMAP bodyStructure tree and return parts with disposition=attachment */
+function findAttachmentParts(
+  node: Record<string, unknown> | null | undefined,
+  path = '',
+): Array<{ part: string; name: string; mime: string; size: number }> {
+  if (!node) return []
+  const type = ((node.type as string) ?? '').toLowerCase()
+  if (type === 'multipart') {
+    const children = (node.childNodes as Record<string, unknown>[]) ?? []
+    return children.flatMap((child, i) =>
+      findAttachmentParts(child, path ? `${path}.${i + 1}` : `${i + 1}`)
+    )
+  }
+  const disposition = (((node.disposition as Record<string, unknown>)?.value as string) ?? '').toLowerCase()
+  if (disposition !== 'attachment') return []
+  const dispParams  = ((node.disposition as Record<string, unknown>)?.params ?? {}) as Record<string, string>
+  const nodeParams  = ((node.parameters as Record<string, string>) ?? {})
+  const name = dispParams.filename || nodeParams.name || `file-${path || '1'}`
+  const mime = `${type}/${((node.subtype as string) ?? 'octet-stream').toLowerCase()}`
+  const size = (node.size as number) ?? 0
+  return [{ part: path || '1', name, mime, size }]
+}
 
 /**
  * IMAP Sync — Safe by design:
@@ -134,10 +165,20 @@ export async function GET() {
         const toProcess = uids.reverse().slice(0, 2000)
         if (toProcess.length === 0) continue
 
+        // Attachment work collected during fetch — processed after flushBuffer()
+        type AttachWork = {
+          uid: number
+          sourceId: string
+          matchedEmail: string
+          parts: Array<{ part: string; name: string; mime: string; size: number }>
+        }
+        const attachWork: AttachWork[] = []
+
         for await (const msg of client.fetch(toProcess, {
           uid: true,
           envelope: true,
           internalDate: true,
+          bodyStructure: true,
           bodyParts: ['1'],
         }, { uid: true })) {
 
@@ -287,11 +328,68 @@ export async function GET() {
             occurred_at: date.toISOString(),
           })
 
+          // Queue attachment work (processed after flush — cannot fetchOne mid-fetch)
+          const attParts = findAttachmentParts(msg.bodyStructure as unknown as Record<string, unknown> | null)
+          if (attParts.length > 0) {
+            attachWork.push({ uid: msg.uid, sourceId: messageId, matchedEmail, parts: attParts })
+          }
+
           // Flush every 50
           if (buffer.length >= 50) await flushBuffer()
         }
 
         await flushBuffer()
+
+        // ── Attachment download + analysis (runs after all interactions are inserted) ──
+        if (attachWork.length > 0) {
+          await supabase.storage.createBucket(ATTACH_BUCKET, { public: true }).catch(() => null)
+
+          for (const work of attachWork) {
+            const attachments: AttachmentMeta[] = []
+
+            for (const att of work.parts) {
+              if (att.size > ATTACH_MAX_BYTES) {
+                attachments.push({
+                  name: att.name, mime: att.mime, size: att.size, url: null,
+                  ai_summary: `${att.name} (${(att.size / 1024 / 1024).toFixed(1)} MB — too large to download)`,
+                })
+                continue
+              }
+              try {
+                const attMsg = await client.fetchOne(work.uid.toString(), { bodyParts: [att.part] }, { uid: true })
+                if (!attMsg) continue
+                const attBuf = (attMsg as Exclude<typeof attMsg, false>).bodyParts?.get(att.part)
+                if (!attBuf) continue
+
+                const nodeBuffer = Buffer.from(attBuf)
+                const ext = att.name.includes('.') ? att.name.split('.').pop() : 'bin'
+                const fileName = `${work.sourceId.replace(/[^a-z0-9]/gi, '_').slice(0, 40)}/${randomUUID()}.${ext}`
+
+                const { error: upErr } = await supabase.storage
+                  .from(ATTACH_BUCKET)
+                  .upload(fileName, nodeBuffer, { contentType: att.mime, upsert: false })
+                if (upErr) continue
+
+                const { data: { publicUrl } } = supabase.storage.from(ATTACH_BUCKET).getPublicUrl(fileName)
+
+                const ai_summary = att.size <= ATTACH_MAX_ANALYZE
+                  ? await analyzeAttachment(nodeBuffer, { mime: att.mime, name: att.name, size: att.size })
+                  : att.name
+
+                attachments.push({ name: att.name, mime: att.mime, size: att.size, url: publicUrl, ai_summary })
+              } catch (err) {
+                console.error('Attachment fetch/upload error:', att.name, err)
+              }
+            }
+
+            if (attachments.length > 0) {
+              await supabase
+                .from('interactions')
+                .update({ metadata: { matched_email: work.matchedEmail, attachments } })
+                .eq('source_id', work.sourceId)
+            }
+          }
+        }
       } finally {
         lock.release()
       }

@@ -145,16 +145,18 @@ export function SendEmailDialog({
   allEmails = [],
   onClose,
 }: Props) {
-  const [to,        setTo]        = useState(customerEmail)
-  const [cc,        setCc]        = useState('')
-  const [bcc,       setBcc]       = useState('')
-  const [showCcBcc, setShowCcBcc] = useState(false)
-  const [subject,   setSubject]   = useState('')
-  const [body,      setBody]      = useState('')
-  const [templates, setTemplates] = useState<Template[]>([])
-  const [loading,   setLoading]   = useState(false)
-  const [drafting,  setDrafting]  = useState(false)
-  const [language,  setLanguage]  = useState<'pt-PT' | 'en'>('pt-PT')
+  const [to,          setTo]          = useState(customerEmail)
+  const [cc,          setCc]          = useState('')
+  const [bcc,         setBcc]         = useState('')
+  const [showCcBcc,   setShowCcBcc]   = useState(false)
+  const [subject,     setSubject]     = useState('')
+  const [body,        setBody]        = useState('')
+  const [templates,   setTemplates]   = useState<Template[]>([])
+  const [loading,     setLoading]     = useState(false)
+  const [drafting,    setDrafting]    = useState(false)
+  const [language,    setLanguage]    = useState<'pt-PT' | 'en'>('pt-PT')
+  const [refineInput, setRefineInput] = useState('')
+  const [refining,    setRefining]    = useState(false)
 
   useEffect(() => { setTo(customerEmail) }, [customerEmail])
 
@@ -200,6 +202,7 @@ export function SendEmailDialog({
             subject: i.subject,
             content: i.content,
             occurred_at: i.occurred_at,
+            metadata: i.metadata ?? null,
           })),
         }),
       })
@@ -214,6 +217,28 @@ export function SendEmailDialog({
       toast.error(e instanceof Error ? e.message : 'Erro ao gerar rascunho.')
     } finally {
       setDrafting(false)
+    }
+  }
+
+  async function handleRefine() {
+    if (!body.trim() || !refineInput.trim()) return
+    setRefining(true)
+    try {
+      const res = await fetch('/api/ai/refine-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentDraft: body, instruction: refineInput, language }),
+      })
+      const text = await res.text()
+      let json: { ok: boolean; body?: string; error?: string }
+      try { json = JSON.parse(text) } catch { throw new Error('Servidor sem resposta.') }
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      if (json.body) { setBody(json.body); toast.success('Rascunho ajustado!') }
+      setRefineInput('')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao ajustar rascunho.')
+    } finally {
+      setRefining(false)
     }
   }
 
@@ -253,6 +278,7 @@ export function SendEmailDialog({
     setBody('')
     setCc('')
     setBcc('')
+    setRefineInput('')
     onClose()
   }
 
@@ -393,6 +419,35 @@ export function SendEmailDialog({
               style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', resize: 'none' }}
             />
           </div>
+
+          {/* Refine with AI — shown once draft exists */}
+          {body.trim() && (
+            <div className="flex gap-2">
+              <input
+                className="flex-1 h-9 rounded-lg px-3 text-sm outline-none"
+                style={{
+                  background: 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--foreground)',
+                }}
+                placeholder="Ajustar: ex. adicionar link Calendly, pedir nome da conta…"
+                value={refineInput}
+                onChange={(e) => setRefineInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !refining) handleRefine() }}
+                disabled={refining}
+              />
+              <Button
+                onClick={handleRefine}
+                disabled={refining || !refineInput.trim()}
+                className="h-9 shrink-0 gap-1.5 rounded-lg text-[12px] font-medium"
+                style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)', border: '1px solid rgba(91,91,214,0.25)' }}
+              >
+                {refining
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> A ajustar…</>
+                  : <><Sparkles className="h-3.5 w-3.5" /> Aplicar</>}
+              </Button>
+            </div>
+          )}
         </div>
 
         <DialogFooter className="gap-2 pt-2">

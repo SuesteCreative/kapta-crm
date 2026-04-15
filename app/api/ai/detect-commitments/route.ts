@@ -41,7 +41,7 @@ export async function POST() {
 
   const { data: interactions } = await supabase
     .from('interactions')
-    .select('id, customer_id, type, direction, subject, content, occurred_at, customers(id, name, company)')
+    .select('id, customer_id, type, direction, subject, content, metadata, occurred_at, customers(id, name, company)')
     .gte('occurred_at', since)
     .or('type.eq.meeting,type.eq.call,type.eq.note,and(type.eq.email,direction.eq.outbound),and(type.eq.whatsapp,direction.eq.outbound)')
     .order('occurred_at', { ascending: false })
@@ -84,7 +84,9 @@ export async function POST() {
   const itemsText = batch.map((i) => {
     const customer = Array.isArray(i.customers) ? i.customers[0] : i.customers
     const label = customer ? `${customer.name}${customer.company ? ` (${customer.company})` : ''}` : 'Desconhecido'
-    const body = (i.content ?? '').slice(0, 800)
+    const atts = ((i.metadata as Record<string, unknown>)?.attachments as Array<{ name: string; ai_summary?: string }> | undefined) ?? []
+    const attSuffix = atts.length > 0 ? ` [Attachments: ${atts.map((a) => `${a.name}: ${a.ai_summary ?? a.name}`).join(' | ')}]` : ''
+    const body = (i.content ?? '').slice(0, 800) + attSuffix
     return JSON.stringify({
       customer_id: i.customer_id,
       type: i.type,

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ExternalLink, ImagePlus, X, Loader2 } from 'lucide-react'
+import { ExternalLink, ImagePlus, Paperclip, X, Loader2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 
@@ -71,6 +71,11 @@ export function AddInteractionDialog({ open, customerId, onClose }: Props) {
   const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  type FileMeta = { url: string; name: string; mime: string; size: number; ai_summary: string }
+  const [attachments, setAttachments] = useState<FileMeta[]>([])
+  const [uploadingFiles, setUploadingFiles] = useState(0)
+  const fileAttachRef = useRef<HTMLInputElement>(null)
+
   const isMeeting = form.type === 'meeting'
   const isNote = form.type === 'note'
 
@@ -128,10 +133,39 @@ export function AddInteractionDialog({ open, customerId, onClose }: Props) {
     })
   }
 
+  async function uploadFileAttachment(file: File) {
+    setUploadingFiles((n) => n + 1)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/upload/file', { method: 'POST', body: fd })
+      const json = await res.json()
+      if (!json.url) throw new Error(json.error ?? 'Upload failed')
+      setAttachments((prev) => [...prev, {
+        url: json.url, name: json.name, mime: json.mime, size: json.size, ai_summary: json.ai_summary ?? json.name,
+      }])
+    } catch (err) {
+      toast.error('Erro ao carregar ficheiro', { description: String(err) })
+    } finally {
+      setUploadingFiles((n) => n - 1)
+    }
+  }
+
+  function handleFileAttachInput(e: React.ChangeEvent<HTMLInputElement>) {
+    Array.from(e.target.files ?? []).forEach(uploadFileAttachment)
+    e.target.value = ''
+  }
+
+  function removeAttachment(idx: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx))
+  }
+
   function reset() {
     images.forEach((img) => URL.revokeObjectURL(img.preview))
     setImages([])
     setUploadingCount(0)
+    setAttachments([])
+    setUploadingFiles(0)
     setForm({
       type: 'email', direction: 'inbound', subject: '', content: '',
       bubbles_url: '', bubbles_title: '', occurred_at: new Date().toISOString().slice(0, 16),
@@ -142,10 +176,13 @@ export function AddInteractionDialog({ open, customerId, onClose }: Props) {
 
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
-    if (uploadingCount > 0) { toast.error('Aguarda o upload das imagens.'); return }
+    if (uploadingCount > 0 || uploadingFiles > 0) { toast.error('Aguarda o upload dos ficheiros.'); return }
     setLoading(true)
     try {
       const imageUrls = images.map((img) => img.url)
+      const meta: Record<string, unknown> = {}
+      if (imageUrls.length > 0) meta.images = imageUrls
+      if (attachments.length > 0) meta.attachments = attachments
       const { error } = await supabase.from('interactions').insert({
         customer_id: customerId,
         type: form.type,
@@ -155,7 +192,7 @@ export function AddInteractionDialog({ open, customerId, onClose }: Props) {
         bubbles_url: form.bubbles_url || null,
         bubbles_title: form.bubbles_title || null,
         occurred_at: new Date(form.occurred_at).toISOString(),
-        metadata: imageUrls.length > 0 ? { images: imageUrls } : null,
+        metadata: Object.keys(meta).length > 0 ? meta : null,
       })
       if (error) throw error
       toast.success('Interação adicionada!')
@@ -324,10 +361,46 @@ export function AddInteractionDialog({ open, customerId, onClose }: Props) {
             )}
           </div>
 
+          {/* File attachment */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Ficheiros (opcional)</Label>
+              <button
+                type="button"
+                onClick={() => fileAttachRef.current?.click()}
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px] font-medium transition-opacity hover:opacity-70"
+                style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
+              >
+                {uploadingFiles > 0
+                  ? <><Loader2 className="h-3 w-3 animate-spin" /> A carregar…</>
+                  : <><Paperclip className="h-3 w-3" /> Anexar ficheiro</>}
+              </button>
+              <input ref={fileAttachRef} type="file" multiple className="hidden" onChange={handleFileAttachInput} />
+            </div>
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {attachments.map((att, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px]"
+                    style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                    title={att.ai_summary}
+                  >
+                    <Paperclip className="h-3 w-3 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
+                    {att.name}
+                    <button type="button" onClick={() => removeAttachment(idx)} className="hover:opacity-70">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           <DialogFooter>
             <Button type="button" variant="outline" onClick={handleClose}>Cancelar</Button>
-            <Button type="submit" disabled={loading || uploadingCount > 0}>
-              {loading ? 'A guardar…' : uploadingCount > 0 ? `A carregar (${uploadingCount})…` : 'Guardar'}
+            <Button type="submit" disabled={loading || uploadingCount > 0 || uploadingFiles > 0}>
+              {loading ? 'A guardar…' : (uploadingCount + uploadingFiles) > 0 ? `A carregar…` : 'Guardar'}
             </Button>
           </DialogFooter>
         </form>
