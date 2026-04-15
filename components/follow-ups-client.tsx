@@ -3,11 +3,12 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { CheckCircle2, Circle, AlertTriangle, Clock, CalendarDays, Sparkles, Loader2, X, ShieldAlert, Mail } from 'lucide-react'
+import { CheckCircle2, Circle, AlertTriangle, Clock, CalendarDays, Sparkles, Loader2, X, ShieldAlert, Mail, Search } from 'lucide-react'
 import { cn, dueDateLabel, PRIORITY_STYLES } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import type { FollowUp, Interaction } from '@/lib/database.types'
 import { SendEmailDialog } from '@/components/send-email-dialog'
 
@@ -139,12 +140,19 @@ export function FollowUpsClient({
   const [filteringSpam, setFilteringSpam] = useState(false)
   const [spamIds, setSpamIds] = useState<Set<string>>(new Set()) // interaction IDs marked spam this session
   const [replyTarget, setReplyTarget] = useState<NeedsReplyEntry | null>(null)
+  const [search, setSearch] = useState('')
 
   const today = new Date().toISOString().split('T')[0]
-  const overdue    = followUps.filter((f) => f.status === 'open' && f.due_date && f.due_date < today)
-  const todayItems = followUps.filter((f) => f.status === 'open' && f.due_date === today)
-  const upcoming   = followUps.filter((f) => f.status === 'open' && (!f.due_date || f.due_date > today))
-  const done       = followUps.filter((f) => f.status === 'done')
+
+  function matchesSearch(f: { title?: string | null }) {
+    if (!search) return true
+    return f.title?.toLowerCase().includes(search.toLowerCase()) ?? false
+  }
+
+  const overdue    = followUps.filter((f) => f.status === 'open' && f.due_date && f.due_date < today && matchesSearch(f))
+  const todayItems = followUps.filter((f) => f.status === 'open' && f.due_date === today && matchesSearch(f))
+  const upcoming   = followUps.filter((f) => f.status === 'open' && (!f.due_date || f.due_date > today) && matchesSearch(f))
+  const done       = followUps.filter((f) => f.status === 'done' && matchesSearch(f))
   const openCount  = overdue.length + todayItems.length + upcoming.length
 
   // Smart "needs reply": most recent email per customer, inbound only
@@ -404,7 +412,8 @@ export function FollowUpsClient({
         )}
       </div>
 
-      {/* Tabs */}
+      {/* Tabs + search row */}
+      <div className="flex items-center gap-3 flex-wrap">
       <div className="inline-flex rounded-lg p-1 gap-1" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
         {tabs.map(({ key, label }) => (
           <button
@@ -419,6 +428,20 @@ export function FollowUpsClient({
             {label}
           </button>
         ))}
+      </div>
+
+      {(tab === 'open' || tab === 'done') && (
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />
+          <Input
+            className="pl-9 h-9 w-[260px] text-sm rounded-lg"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+            placeholder="Pesquisar título, cliente…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      )}
       </div>
 
       {/* Sem resposta */}

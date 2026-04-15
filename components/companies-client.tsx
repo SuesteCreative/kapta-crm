@@ -23,6 +23,7 @@ interface CompanyRow {
 export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
   const router = useRouter()
   const [search, setSearch] = useState('')
+  const [showEmpty, setShowEmpty] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [importing, setImporting] = useState(false)
   const [cleaning, setCleaning] = useState(false)
@@ -60,6 +61,7 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
   }
 
   const filtered = companies.filter((c) => {
+    if (showEmpty && c.customers.length > 0) return false
     if (!search) return true
     const q = search.toLowerCase()
     return (
@@ -112,23 +114,36 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative">
-        <Search
-          className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4"
-          style={{ color: 'var(--muted-foreground)' }}
-        />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Pesquisar nome, domínio, indústria…"
-          className="pl-9"
+      {/* Search + filters */}
+      <div className="flex gap-2.5 items-center flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4"
+            style={{ color: 'var(--muted-foreground)' }}
+          />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Pesquisar nome, domínio, indústria…"
+            className="pl-9"
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              color: 'var(--foreground)',
+            }}
+          />
+        </div>
+        <button
+          onClick={() => setShowEmpty(!showEmpty)}
+          className="h-9 px-3 rounded-lg text-[12px] font-medium transition-all whitespace-nowrap"
           style={{
-            background: 'var(--card)',
-            border: '1px solid var(--border)',
-            color: 'var(--foreground)',
+            background: showEmpty ? 'var(--foreground)' : 'var(--card)',
+            color: showEmpty ? 'var(--card)' : 'var(--muted-foreground)',
+            border: `1px solid ${showEmpty ? 'var(--foreground)' : 'var(--border)'}`,
           }}
-        />
+        >
+          Sem contactos
+        </button>
       </div>
 
       {/* List */}

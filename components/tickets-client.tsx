@@ -3,9 +3,10 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Copy, Check, Sparkles, Loader2, Users, Mail, MessageCircle, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Copy, Check, Sparkles, Loader2, Users, Mail, MessageCircle, X, ChevronDown, ChevronUp, Search } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { PRIORITY_STYLES, formatDate } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
@@ -113,6 +114,7 @@ function ticketToWhatsApp(t: TicketWithCustomer): string {
 
 export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
   const router = useRouter()
+  const [search,         setSearch]         = useState('')
   const [statusFilter,   setStatusFilter]   = useState('all')
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [copiedId,       setCopiedId]       = useState<string | null>(null)
@@ -129,6 +131,15 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
   const filtered = tickets.filter((t) => {
     if (statusFilter !== 'all' && t.status !== statusFilter) return false
     if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false
+    if (search) {
+      const q = search.toLowerCase()
+      const customer = Array.isArray(t.customers) ? t.customers[0] : t.customers
+      if (
+        !t.title?.toLowerCase().includes(q) &&
+        !t.description?.toLowerCase().includes(q) &&
+        !customer?.name?.toLowerCase().includes(q)
+      ) return false
+    }
     return true
   })
 
@@ -427,7 +438,17 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
       )}
 
       {/* Filters */}
-      <div className="flex gap-2.5">
+      <div className="flex gap-2.5 flex-wrap">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />
+          <Input
+            className="pl-9 h-9 w-[240px] text-sm rounded-lg"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+            placeholder="Pesquisar título, cliente…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger
             className="h-9 w-40 text-sm rounded-lg"

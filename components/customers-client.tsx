@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Search, Heart } from 'lucide-react'
+import { Plus, Search, Heart, ArrowUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn, STATUS_STYLES, STATUS_LABELS, healthColor } from '@/lib/utils'
 import type { CustomerWithIdentifiers } from '@/lib/database.types'
 import { NewCustomerDialog } from '@/components/new-customer-dialog'
@@ -14,18 +15,32 @@ const ALL_STATUSES = ['onboarding', 'active', 'at-risk', 'troubleshooting', 'chu
 export function CustomersClient({ customers }: { customers: CustomerWithIdentifiers[] }) {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const [healthFilter, setHealthFilter] = useState<'all' | 'low' | 'mid' | 'high'>('all')
+  const [sortBy, setSortBy] = useState<'name' | 'health_asc' | 'health_desc'>('name')
   const [showNew, setShowNew] = useState(false)
   const router = useRouter()
 
-  const filtered = customers.filter((c) => {
-    const matchesSearch =
-      !search ||
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.company?.toLowerCase().includes(search.toLowerCase()) ||
-      c.customer_identifiers.some((i) => i.value.toLowerCase().includes(search.toLowerCase()))
-    const matchesStatus = !statusFilter || c.status === statusFilter
-    return matchesSearch && matchesStatus
-  })
+  const filtered = customers
+    .filter((c) => {
+      const q = search.toLowerCase()
+      const matchesSearch =
+        !search ||
+        c.name.toLowerCase().includes(q) ||
+        c.company?.toLowerCase().includes(q) ||
+        c.customer_identifiers.some((i) => i.value.toLowerCase().includes(q))
+      const matchesStatus = !statusFilter || c.status === statusFilter
+      const matchesHealth =
+        healthFilter === 'all' ? true :
+        healthFilter === 'low'  ? c.health_score <= 2 :
+        healthFilter === 'mid'  ? c.health_score === 3 :
+        c.health_score >= 4
+      return matchesSearch && matchesStatus && matchesHealth
+    })
+    .sort((a, b) =>
+      sortBy === 'health_asc' ? a.health_score - b.health_score :
+      sortBy === 'health_desc' ? b.health_score - a.health_score :
+      a.name.localeCompare(b.name)
+    )
 
   return (
     <div className="p-7 max-w-[1100px] mx-auto space-y-6 animate-fade-in">
@@ -93,6 +108,36 @@ export function CustomersClient({ customers }: { customers: CustomerWithIdentifi
               </button>
             )
           })}
+        </div>
+
+        {/* Health + Sort */}
+        <div className="flex gap-2 ml-auto">
+          <div className="flex gap-1 rounded-lg p-0.5" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+            {([['all', 'Saúde'], ['low', '❤️ ≤2'], ['mid', '🟡 3'], ['high', '💚 ≥4']] as const).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setHealthFilter(val)}
+                className="px-2.5 py-1 rounded-md text-[12px] font-medium transition-all"
+                style={{
+                  background: healthFilter === val ? 'var(--foreground)' : 'transparent',
+                  color: healthFilter === val ? 'var(--card)' : 'var(--muted-foreground)',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+            <SelectTrigger className="h-9 w-44 text-[12px] rounded-lg gap-1.5" style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
+              <ArrowUpDown className="h-3 w-3 shrink-0" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Ordenar por nome</SelectItem>
+              <SelectItem value="health_asc">Saúde ↑ (críticos primeiro)</SelectItem>
+              <SelectItem value="health_desc">Saúde ↓ (melhores primeiro)</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
