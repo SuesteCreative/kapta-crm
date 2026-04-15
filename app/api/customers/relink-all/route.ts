@@ -4,17 +4,6 @@ import { createServiceClient } from '@/lib/supabase'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-/**
- * POST { preview?: true } — returns count of interactions that would be moved
- * POST { confirm?: true } — performs re-link for ALL mismatched interactions
- *
- * Logic: for every email registered in customer_identifiers, find interactions
- * where metadata->>matched_email equals that email but customer_id differs.
- * Those interactions belong to the wrong customer and get moved.
- *
- * Safe: only moves interactions where the correct owner is unambiguous
- * (the email is explicitly registered as an identifier on exactly one customer).
- */
 export async function POST(request: Request) {
   const supabase = createServiceClient()
 
@@ -26,7 +15,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'preview or confirm required' }, { status: 400 })
   }
 
-  // Load all email identifiers: email → customer_id
+  // 1. Load all email identifiers in one query → email → customer_id
   const { data: identifiers, error: idErr } = await supabase
     .from('customer_identifiers')
     .select('value, customer_id')
@@ -34,7 +23,7 @@ export async function POST(request: Request) {
 
   if (idErr) return NextResponse.json({ ok: false, error: idErr.message }, { status: 500 })
 
-  // Detect ambiguous emails (same email registered on 2+ customers) — skip those
+  // Skip emails registered on 2+ customers (ambiguous)
   const emailCount = new Map<string, number>()
   for (const id of identifiers ?? []) {
     const e = id.value.toLowerCase().trim()
@@ -47,54 +36,65 @@ export async function POST(request: Request) {
   }
 
   if (emailToCustomer.size === 0) {
-    return NextResponse.json({ ok: true, preview: !!preview, total: 0, orphaned_customer_ids: [] })
+    return NextResponse.json({ ok: true, preview: !!preview, total: 0, groups: 0 })
   }
 
-  // For each registered email, find interactions under a different customer
-  type MoveGroup = { email: string; correct_customer_id: string; interaction_ids: string[] }
-  const moves: MoveGroup[] = []
+  // 2. Load ALL interactions that have a matched_email set — one query, no N+1
+  const { data: interactions, error: intErr } = await supabase
+    .from('interactions')
+    .select('id, customer_id, metadata')
+    .not('metadata->>matched_email', 'is', null)
+    .range(0, 9999)
 
-  for (const [email, correctCustomerId] of emailToCustomer) {
-    const { data: rows } = await supabase
-      .from('interactions')
-      .select('id, customer_id')
-      .eq('metadata->>matched_email', email)
-      .neq('customer_id', correctCustomerId)
+  if (intErr) return NextResponse.json({ ok: false, error: intErr.message }, { status: 500 })
 
-    if (rows && rows.length > 0) {
-      moves.push({ email, correct_customer_id: correctCustomerId, interaction_ids: rows.map((r) => r.id) })
-    }
+  // 3. Filter in JS: interactions where matched_email maps to a different customer
+  type MoveItem = { id: string; wrong_customer_id: string; correct_customer_id: string }
+  const toMove: MoveItem[] = []
+
+  for (const row of interactions ?? []) {
+    const meta = row.metadata as Record<string, unknown> | null
+    const matchedEmail = (meta?.matched_email as string | undefined)?.toLowerCase().trim()
+    if (!matchedEmail) continue
+
+    const correctId = emailToCustomer.get(matchedEmail)
+    if (!correctId) continue           // email not registered on any customer
+    if (correctId === row.customer_id) continue  // already correct
+
+    toMove.push({ id: row.id, wrong_customer_id: row.customer_id, correct_customer_id: correctId })
   }
 
-  const total = moves.reduce((sum, m) => sum + m.interaction_ids.length, 0)
+  // Count distinct wrong customers for grouping info
+  const wrongCustomers = new Set(toMove.map((m) => m.wrong_customer_id))
 
   if (preview) {
-    return NextResponse.json({ ok: true, preview: true, total, groups: moves.length })
+    return NextResponse.json({ ok: true, preview: true, total: toMove.length, groups: wrongCustomers.size })
   }
 
-  // Perform moves
+  if (toMove.length === 0) {
+    return NextResponse.json({ ok: true, moved: 0, orphaned_customer_ids: [] })
+  }
+
+  // 4. Batch update by correct_customer_id (one update per destination, not per row)
+  const byDestination = new Map<string, string[]>()
+  for (const item of toMove) {
+    const ids = byDestination.get(item.correct_customer_id) ?? []
+    ids.push(item.id)
+    byDestination.set(item.correct_customer_id, ids)
+  }
+
   let moved = 0
-  const affectedWrongCustomers = new Set<string>()
-
-  for (const move of moves) {
-    // Fetch wrong customer_ids before updating (need them for orphan check)
-    const { data: before } = await supabase
-      .from('interactions')
-      .select('customer_id')
-      .in('id', move.interaction_ids)
-    for (const r of before ?? []) affectedWrongCustomers.add(r.customer_id)
-
+  for (const [correctId, ids] of byDestination) {
     const { error } = await supabase
       .from('interactions')
-      .update({ customer_id: move.correct_customer_id })
-      .in('id', move.interaction_ids)
-
-    if (!error) moved += move.interaction_ids.length
+      .update({ customer_id: correctId })
+      .in('id', ids)
+    if (!error) moved += ids.length
   }
 
-  // Detect orphaned customers: 0 interactions + 0 tickets + 0 follow-ups
+  // 5. Detect orphaned customers (0 interactions + 0 tickets + 0 follow-ups)
   const orphanedCustomerIds: string[] = []
-  for (const wrongId of affectedWrongCustomers) {
+  for (const wrongId of wrongCustomers) {
     const [{ count: intCount }, { count: ticketCount }, { count: fuCount }] = await Promise.all([
       supabase.from('interactions').select('id', { count: 'exact', head: true }).eq('customer_id', wrongId),
       supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('customer_id', wrongId),
