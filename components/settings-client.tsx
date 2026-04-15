@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
-import { Save, Eye, Code } from 'lucide-react'
+import { Save, Eye, Code, Link2 } from 'lucide-react'
 
 const DEFAULT_SIGNATURE_HTML = `<div style="font-family:Arial,Helvetica,sans-serif;color:#2d2d2d;font-size:13px;line-height:1.6;border-top:2px solid #c0272b;padding-top:14px;margin-top:8px;max-width:480px;">
 
@@ -37,6 +37,52 @@ export function SettingsClient({ initialSignature }: Props) {
   const [html, setHtml] = useState(initialSignature || DEFAULT_SIGNATURE_HTML)
   const [saving, setSaving] = useState(false)
   const [mode, setMode] = useState<'preview' | 'code'>('preview')
+  const [relinking, setRelinking] = useState(false)
+  const [relinkPreview, setRelinkPreview] = useState<{ total: number; groups: number } | null>(null)
+
+  async function handleRelinkPreview() {
+    setRelinking(true)
+    try {
+      const res = await fetch('/api/customers/relink-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preview: true }),
+      })
+      const data = await res.json()
+      if (!data.ok) { toast.error(data.error); return }
+      if (data.total === 0) {
+        toast.success('Nenhuma interação mal-ligada encontrada.')
+        return
+      }
+      setRelinkPreview({ total: data.total, groups: data.groups })
+    } catch {
+      toast.error('Erro ao verificar interações.')
+    } finally {
+      setRelinking(false)
+    }
+  }
+
+  async function handleRelinkConfirm() {
+    setRelinking(true)
+    try {
+      const res = await fetch('/api/customers/relink-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      })
+      const data = await res.json()
+      if (!data.ok) { toast.error(data.error); return }
+      toast.success(`${data.moved} interação(ões) re-ligadas com sucesso.`)
+      if (data.orphaned_customer_ids?.length > 0) {
+        toast.warning(`${data.orphaned_customer_ids.length} cliente(s) duplicado(s) ficaram sem dados — verifique e elimine manualmente.`, { duration: 8000 })
+      }
+    } catch {
+      toast.error('Erro ao re-ligar interações.')
+    } finally {
+      setRelinking(false)
+      setRelinkPreview(null)
+    }
+  }
 
   async function handleSave() {
     setSaving(true)
@@ -80,6 +126,58 @@ export function SettingsClient({ initialSignature }: Props) {
         <p className="text-sm mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
           Configurações da conta e preferências
         </p>
+      </div>
+
+      {/* Re-link card */}
+      <div
+        className="rounded-xl p-6 space-y-3"
+        style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+      >
+        <div>
+          <h2 className="text-[15px] font-semibold" style={{ color: 'var(--foreground)' }}>
+            Resolver interações mal-ligadas
+          </h2>
+          <p className="text-[13px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+            Encontra e move interações que estão associadas a um cliente errado, com base nos emails registados. Executar uma vez para limpar dados históricos.
+          </p>
+        </div>
+
+        {relinkPreview ? (
+          <div className="space-y-3">
+            <p className="text-[13px]" style={{ color: 'var(--foreground)' }}>
+              Encontradas <strong>{relinkPreview.total}</strong> interação(ões) em <strong>{relinkPreview.groups}</strong> grupo(s) para mover. Confirmar?
+            </p>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleRelinkConfirm}
+                disabled={relinking}
+                className="gap-2 rounded-lg text-[13px] font-medium"
+                style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                {relinking ? 'A re-ligar…' : 'Confirmar re-ligação'}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setRelinkPreview(null)}
+                disabled={relinking}
+                className="rounded-lg text-[13px]"
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            onClick={handleRelinkPreview}
+            disabled={relinking}
+            variant="outline"
+            className="gap-2 rounded-lg text-[13px] font-medium"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            {relinking ? 'A verificar…' : 'Verificar e corrigir'}
+          </Button>
+        )}
       </div>
 
       {/* Signature card */}

@@ -300,27 +300,9 @@ export async function GET() {
               }
             }
 
-            // 3. Auto-create lead if we found an external email but no customer yet
-            if (!customerId && primarySenderEmail) {
-              const senderName = primarySenderName || primarySenderEmail.split('@')[0]
-              const { data: newCustomer, error: insertErr } = await supabase
-                .from('customers')
-                .insert({ name: senderName, status: 'onboarding', health_score: 3 })
-                .select('id')
-                .single()
-              if (!insertErr && newCustomer) {
-                await supabase.from('customer_identifiers').insert({
-                  customer_id: newCustomer.id,
-                  type: 'email',
-                  value: primarySenderEmail,
-                  is_primary: true,
-                })
-                emailToCustomerId.set(primarySenderEmail, newCustomer.id)
-                customerId   = newCustomer.id
-                matchedEmail = primarySenderEmail
-                created++
-              }
-            }
+            // Outbound to unknown address → skip. Pedro knows who he emailed.
+            // If they're not in the CRM, he'll add them manually.
+            // Auto-creating here is the root cause of duplicate customer records.
           }
 
           if (!customerId) { unknown++; continue }
