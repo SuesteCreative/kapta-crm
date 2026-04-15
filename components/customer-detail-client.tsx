@@ -25,6 +25,7 @@ import { BubblesVideoModal } from '@/components/bubbles-video-modal'
 import { PasteConversationDialog } from '@/components/paste-conversation-dialog'
 import { SendEmailDialog } from '@/components/send-email-dialog'
 import { OnboardingDialog } from '@/components/onboarding-dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import Link from 'next/link'
@@ -142,6 +143,28 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
     toast.success('Interação apagada.')
     setDeletingId(null)
     refresh()
+  }
+
+  const [showDeleteCustomer, setShowDeleteCustomer] = useState(false)
+  const [deletingCustomer,   setDeletingCustomer]   = useState(false)
+
+  async function deleteCustomer() {
+    setDeletingCustomer(true)
+    try {
+      // Explicit cascade — delete related records first, then the customer
+      await supabase.from('interactions').delete().eq('customer_id', customer.id)
+      await supabase.from('follow_ups').delete().eq('customer_id', customer.id)
+      await supabase.from('tickets').delete().eq('customer_id', customer.id)
+      await supabase.from('customer_identifiers').delete().eq('customer_id', customer.id)
+      const { error } = await supabase.from('customers').delete().eq('id', customer.id)
+      if (error) throw error
+      toast.success(`${customer.name} eliminado.`)
+      router.push('/customers')
+    } catch {
+      toast.error('Erro ao eliminar cliente.')
+      setDeletingCustomer(false)
+      setShowDeleteCustomer(false)
+    }
   }
 
   const [syncingEmails, setSyncingEmails] = useState(false)
@@ -315,6 +338,14 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
             >
               <Plus className="h-3.5 w-3.5" /> Ticket
             </Button>
+            <button
+              onClick={() => setShowDeleteCustomer(true)}
+              title="Eliminar cliente"
+              className="h-8 w-8 flex items-center justify-center rounded-lg transition-opacity hover:opacity-70"
+              style={{ background: 'rgba(220,38,38,0.08)', color: 'rgb(220,38,38)', border: '1px solid rgba(220,38,38,0.2)' }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
 
@@ -862,6 +893,30 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
         onClose={() => { setShowSendEmail(false); refresh() }}
       />
       <BubblesVideoModal url={bubblesUrl} onClose={() => setBubblesUrl(null)} />
+
+      {/* Delete customer confirmation */}
+      <Dialog open={showDeleteCustomer} onOpenChange={(o) => !o && setShowDeleteCustomer(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Eliminar {customer.name}?</DialogTitle>
+            <DialogDescription>
+              Esta ação é irreversível. Todas as interações, follow-ups, tickets e identificadores associados serão apagados permanentemente.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteCustomer(false)} disabled={deletingCustomer}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={deleteCustomer}
+              disabled={deletingCustomer}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deletingCustomer ? 'A eliminar…' : 'Eliminar cliente'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <OnboardingDialog
         open={showOnboarding}
         customerId={customer.id}

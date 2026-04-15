@@ -45,6 +45,20 @@ function findAttachmentParts(
  * - Skips Spam/Junk/Trash automatically
  * - Treats the entire sending domain (e.g. @kapta.pt) as internal
  */
+// Automated sender prefixes — never create a lead for these
+const AUTOMATED_PREFIXES = [
+  'noreply', 'no-reply', 'donotreply', 'do-not-reply',
+  'notifications', 'notification', 'mailer-daemon', 'postmaster',
+  'bounce', 'bounces', 'unsubscribe', 'newsletter', 'marketing',
+  'automatico', 'automacao', 'robot', 'autoresponder', 'auto-reply',
+  'autoreply', 'info-noreply', 'support-noreply', 'updates', 'alerts',
+]
+
+function isAutomatedSender(email: string): boolean {
+  const local = email.split('@')[0].toLowerCase().replace(/\+.*$/, '') // strip +tag
+  return AUTOMATED_PREFIXES.some((p) => local === p || local.startsWith(p + '-') || local.startsWith(p + '_'))
+}
+
 /** Extract original sender email from a forwarded email body.
  *  Handles Gmail, Outlook, Apple Mail (incl. "> From:" quoted lines). */
 function extractForwardedSender(body: string): { email: string; name: string } | null {
@@ -169,12 +183,12 @@ export async function GET() {
       }
 
       try {
-        const uids: number[] = []
-        for await (const msg of client.fetch('1:*', { uid: true })) {
-          uids.push(msg.uid)
-        }
+        // Only fetch emails from the last 90 days — avoids re-processing old messages
+        const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+        const searchResult = await client.search({ since }, { uid: true })
+        const uids = searchResult === false ? [] : searchResult
 
-        const toProcess = uids.reverse().slice(0, 2000)
+        const toProcess = [...uids].reverse().slice(0, 2000)
         if (toProcess.length === 0) continue
 
         // Attachment work collected during fetch — processed after flushBuffer()
@@ -240,6 +254,11 @@ export async function GET() {
           }
 
           // ── Auto-create lead for unknown inbound senders ──
+          // Skip automated senders (noreply, mailer-daemon, newsletters, etc.)
+          if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail && isAutomatedSender(primarySenderEmail)) {
+            unknown++; continue
+          }
+
           if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail) {
             const senderName = primarySenderName || primarySenderEmail.split('@')[0]
 
