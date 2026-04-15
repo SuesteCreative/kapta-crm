@@ -74,9 +74,20 @@ export async function POST(req: Request) {
   try {
     await client.connect()
 
+    // Discover Sent folder using SPECIAL-USE flag (most reliable across servers)
+    let sentPath = 'Sent'
+    try {
+      const allBoxes = await client.list()
+      const sentBox = allBoxes.find((b) =>
+        (b as unknown as Record<string, unknown>).specialUse === '\\Sent' ||
+        /^(sent|sent messages|sent items|\[gmail\]\/sent mail|gesendet|éléments envoyés)$/i.test(b.name)
+      )
+      if (sentBox) sentPath = sentBox.path
+    } catch { /* list failed — keep default */ }
+
     const mailboxes: { path: string; direction: 'inbound' | 'outbound'; searchField: 'from' | 'to' }[] = [
-      { path: 'INBOX', direction: 'inbound',  searchField: 'from' },
-      { path: 'Sent',  direction: 'outbound', searchField: 'to'   },
+      { path: 'INBOX',   direction: 'inbound',  searchField: 'from' },
+      { path: sentPath,  direction: 'outbound', searchField: 'to'   },
     ]
 
     for (const { path, direction, searchField } of mailboxes) {

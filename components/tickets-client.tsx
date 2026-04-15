@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Copy, Check, Sparkles, Loader2, Users, Mail, MessageCircle } from 'lucide-react'
+import { Copy, Check, Sparkles, Loader2, Users, Mail, MessageCircle, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { PRIORITY_STYLES, formatDate } from '@/lib/utils'
@@ -27,6 +27,16 @@ function getPrimaryEmail(t: TicketWithCustomer): string | null {
   const primary = ids.find((i) => i.type === 'email' && i.is_primary)
   const any = ids.find((i) => i.type === 'email')
   return primary?.value ?? any?.value ?? null
+}
+
+type TicketGlobalSuggestion = {
+  customer_id: string
+  customer_name: string
+  customer_company: string | null
+  title: string
+  description: string
+  priority: 'low' | 'medium' | 'high' | 'urgent'
+  tags: string[]
 }
 
 type IssueCluster = {
@@ -111,6 +121,10 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
   const [bulkEmailCluster,         setBulkEmailCluster]         = useState<IssueCluster | null>(null)
   const [creatingTicketForCluster, setCreatingTicketForCluster] = useState<string | null>(null)
   const [resolutionTicket,         setResolutionTicket]         = useState<{ ticket: TicketWithCustomer; newStatus: string } | null>(null)
+  const [ticketSuggestions,        setTicketSuggestions]        = useState<TicketGlobalSuggestion[]>([])
+  const [analyzingTickets,         setAnalyzingTickets]         = useState(false)
+  const [suggestionsExpanded,      setSuggestionsExpanded]      = useState(true)
+  const [creatingFromSuggId,       setCreatingFromSuggId]       = useState<string | null>(null)
 
   const filtered = tickets.filter((t) => {
     if (statusFilter !== 'all' && t.status !== statusFilter) return false
@@ -135,6 +149,49 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
       toast.error(e instanceof Error ? e.message : 'Erro ao agrupar problemas.')
     } finally {
       setClustering(false)
+    }
+  }
+
+  async function analyzeTickets() {
+    setAnalyzingTickets(true)
+    setTicketSuggestions([])
+    try {
+      const res = await fetch('/api/ai/suggest-tickets-global', { method: 'POST' })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      setTicketSuggestions(json.suggestions)
+      setSuggestionsExpanded(true)
+      if (json.suggestions.length === 0) {
+        toast.success(json.message ?? 'Sem tickets sugeridos.')
+      } else {
+        toast.success(`${json.suggestions.length} ticket(s) sugerido(s)`)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao analisar.')
+    } finally {
+      setAnalyzingTickets(false)
+    }
+  }
+
+  async function createTicketFromSuggestion(s: TicketGlobalSuggestion) {
+    setCreatingFromSuggId(s.customer_id)
+    try {
+      const { error } = await supabase.from('tickets').insert({
+        customer_id: s.customer_id,
+        title: s.title,
+        description: s.description,
+        priority: s.priority,
+        status: 'open',
+        tags: s.tags,
+      })
+      if (error) throw error
+      toast.success('Ticket criado!')
+      setTicketSuggestions((prev) => prev.filter((x) => x.customer_id !== s.customer_id))
+      router.refresh()
+    } catch {
+      toast.error('Erro ao criar ticket.')
+    } finally {
+      setCreatingFromSuggId(null)
     }
   }
 
@@ -201,16 +258,106 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
             {tickets.filter((t) => t.status === 'open').length} abertos · {tickets.length} total
           </p>
         </div>
-        <Button
-          onClick={runClusterIssues}
-          disabled={clustering}
-          className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
-          style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
-        >
-          {clustering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-          {clustering ? 'A analisar…' : 'Agrupar problemas'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={analyzeTickets}
+            disabled={analyzingTickets}
+            variant="outline"
+            className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+          >
+            {analyzingTickets ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {analyzingTickets ? 'A analisar…' : 'Analisar com IA'}
+          </Button>
+          <Button
+            onClick={runClusterIssues}
+            disabled={clustering}
+            className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+          >
+            {clustering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {clustering ? 'A analisar…' : 'Agrupar problemas'}
+          </Button>
+        </div>
       </div>
+
+      {/* AI Ticket suggestions */}
+      {ticketSuggestions.length > 0 && (
+        <div className="space-y-2">
+          <button
+            className="flex items-center gap-2 px-1 w-full"
+            onClick={() => setSuggestionsExpanded((v) => !v)}
+          >
+            <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--primary)' }} />
+            <span className="text-xs font-semibold uppercase tracking-wide flex-1 text-left" style={{ color: 'var(--primary)' }}>
+              Sugestões IA · {ticketSuggestions.length}
+            </span>
+            {suggestionsExpanded
+              ? <ChevronUp className="h-3.5 w-3.5" style={{ color: 'var(--primary)' }} />
+              : <ChevronDown className="h-3.5 w-3.5" style={{ color: 'var(--primary)' }} />}
+          </button>
+          {suggestionsExpanded && ticketSuggestions.map((s) => {
+            const ps = PRIORITY_STYLES[s.priority]
+            return (
+              <div
+                key={s.customer_id}
+                className="rounded-xl p-4"
+                style={{ background: 'var(--card)', border: '1px solid rgba(91,91,214,0.25)', boxShadow: 'var(--shadow-card)' }}
+              >
+                <div className="flex items-start gap-3">
+                  <Sparkles className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--primary)' }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-[14px]" style={{ color: 'var(--foreground)' }}>
+                      {s.title}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--primary)' }}>
+                      {s.customer_name}{s.customer_company ? ` · ${s.customer_company}` : ''}
+                    </p>
+                    <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                      {s.description}
+                    </p>
+                    {s.tags.length > 0 && (
+                      <div className="flex gap-1 flex-wrap mt-2">
+                        {s.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="rounded-md px-2 py-0.5 text-[11px] font-medium"
+                            style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[11.5px] font-medium rounded-full px-2.5 py-0.5" style={{ background: ps.bg, color: ps.text }}>
+                      {s.priority}
+                    </span>
+                    <Button
+                      onClick={() => createTicketFromSuggestion(s)}
+                      disabled={creatingFromSuggId === s.customer_id}
+                      className="h-8 rounded-lg text-[12px] font-medium px-3 gap-1.5"
+                      style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+                    >
+                      {creatingFromSuggId === s.customer_id && <Loader2 className="h-3 w-3 animate-spin" />}
+                      Criar ticket
+                    </Button>
+                    <button
+                      onClick={() => setTicketSuggestions((prev) => prev.filter((x) => x.customer_id !== s.customer_id))}
+                      className="h-8 w-8 flex items-center justify-center rounded-lg transition-opacity hover:opacity-70"
+                      style={{ color: 'var(--muted-foreground)' }}
+                      title="Dispensar sugestão"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* AI Cluster cards */}
       {clusters.length > 0 && (

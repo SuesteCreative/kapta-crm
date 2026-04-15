@@ -2,10 +2,11 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Mail, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2 } from 'lucide-react'
+import { Mail, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
+import { supabase } from '@/lib/supabase'
 
 interface EmailRow {
   id: string
@@ -33,6 +34,14 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [search, setSearch]           = useState('')
   const [dirFilter, setDirFilter]     = useState<string | null>(null)
   const [syncing, setSyncing]         = useState(false)
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
+
+  async function dismissEmail(id: string, currentMetadata: Record<string, unknown> | null) {
+    setDismissedIds((prev) => new Set([...prev, id]))
+    await supabase.from('interactions')
+      .update({ metadata: { ...(currentMetadata ?? {}), is_spam: true } })
+      .eq('id', id)
+  }
 
   // Auto-sync removed — sidebar handles global auto-sync to avoid concurrent requests
 
@@ -70,7 +79,8 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
       (e.customers?.company ?? '').toLowerCase().includes(q) ||
       (e.content ?? '').toLowerCase().includes(q)
     const matchesDir = !dirFilter || e.direction === dirFilter
-    return matchesSearch && matchesDir
+    const notSpam = e.metadata?.is_spam !== true
+    return matchesSearch && matchesDir && notSpam && !dismissedIds.has(e.id)
   })
 
   return (
@@ -83,7 +93,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
             Emails
           </h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-            {emails.length} emails sincronizados
+            {emails.length - dismissedIds.size} emails sincronizados
           </p>
         </div>
         <button
@@ -164,7 +174,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
           return (
             <div
               key={email.id}
-              className="flex gap-4 px-5 py-4 cursor-pointer row-hover"
+              className="group flex gap-4 px-5 py-4 cursor-pointer row-hover"
               style={{ borderBottom: '1px solid var(--border)' }}
               onClick={() => router.push(`/customers/${email.customer_id}`)}
             >
@@ -215,6 +225,15 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                   </div>
                 )}
               </div>
+
+              {/* Dismiss */}
+              <button
+                onClick={(ev) => { ev.stopPropagation(); dismissEmail(email.id, email.metadata) }}
+                className="shrink-0 self-center opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 hover:bg-[var(--border)]"
+                title="Arquivar email"
+              >
+                <X className="h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />
+              </button>
 
               {/* Direction label */}
               <div className="shrink-0 self-center">

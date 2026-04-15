@@ -23,6 +23,15 @@ type CommitmentSuggestion = {
   customer_company: string | null
 }
 
+type FollowUpGlobalSuggestion = {
+  customer_id: string
+  customer_name: string
+  customer_company: string | null
+  title: string
+  description: string
+  priority: 'low' | 'medium' | 'high' | 'urgent'
+}
+
 const CHANNEL_LABELS: Record<string, string> = {
   email: '📧 email',
   whatsapp: '💬 WhatsApp',
@@ -124,6 +133,9 @@ export function FollowUpsClient({
   const [detectingCommitments, setDetectingCommitments] = useState(false)
   const [commitmentSuggestions, setCommitmentSuggestions] = useState<CommitmentSuggestion[]>([])
   const [creatingFollowUpId, setCreatingFollowUpId] = useState<string | null>(null)
+  const [followUpSuggestions, setFollowUpSuggestions] = useState<FollowUpGlobalSuggestion[]>([])
+  const [suggestingFollowUps, setSuggestingFollowUps] = useState(false)
+  const [creatingGlobalFollowUpId, setCreatingGlobalFollowUpId] = useState<string | null>(null)
   const [filteringSpam, setFilteringSpam] = useState(false)
   const [spamIds, setSpamIds] = useState<Set<string>>(new Set()) // interaction IDs marked spam this session
   const [replyTarget, setReplyTarget] = useState<NeedsReplyEntry | null>(null)
@@ -165,9 +177,11 @@ export function FollowUpsClient({
 
   async function markSpam(interactionId: string) {
     setSpamIds((prev) => new Set([...prev, interactionId]))
+    const existing = emailInteractions.find((e) => e.id === interactionId)
+    const currentMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
     await supabase
       .from('interactions')
-      .update({ metadata: { is_spam: true } })
+      .update({ metadata: { ...currentMeta, is_spam: true } })
       .eq('id', interactionId)
   }
 
@@ -200,9 +214,11 @@ export function FollowUpsClient({
       // Mark all in DB and session state
       setSpamIds((prev) => new Set([...prev, ...spamInteractionIds]))
       await Promise.all(
-        spamInteractionIds.map((id) =>
-          supabase.from('interactions').update({ metadata: { is_spam: true } }).eq('id', id)
-        )
+        spamInteractionIds.map((id) => {
+          const existing = emailInteractions.find((e) => e.id === id)
+          const currentMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
+          return supabase.from('interactions').update({ metadata: { ...currentMeta, is_spam: true } }).eq('id', id)
+        })
       )
       toast.success(`${spamInteractionIds.length} email(s) de spam removidos.`)
     } catch (e) {
@@ -271,6 +287,46 @@ export function FollowUpsClient({
     }
   }
 
+  async function suggestFollowUps() {
+    setSuggestingFollowUps(true)
+    setFollowUpSuggestions([])
+    try {
+      const res = await fetch('/api/ai/suggest-follow-ups-global', { method: 'POST' })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      setFollowUpSuggestions(json.suggestions)
+      if (json.suggestions.length === 0) {
+        toast.success(json.message ?? 'Sem sugestões de follow-ups.')
+      } else {
+        toast.success(`${json.suggestions.length} sugestão(ões) gerada(s)`)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao sugerir follow-ups.')
+    } finally {
+      setSuggestingFollowUps(false)
+    }
+  }
+
+  async function createFollowUpFromGlobalSuggestion(s: FollowUpGlobalSuggestion) {
+    setCreatingGlobalFollowUpId(s.customer_id)
+    try {
+      const { error } = await supabase.from('follow_ups').insert({
+        customer_id: s.customer_id,
+        title: s.title,
+        description: s.description,
+        priority: s.priority,
+      })
+      if (error) throw error
+      toast.success('Follow-up criado!')
+      setFollowUpSuggestions((prev) => prev.filter((x) => x.customer_id !== s.customer_id))
+      router.refresh()
+    } catch {
+      toast.error('Erro ao criar follow-up.')
+    } finally {
+      setCreatingGlobalFollowUpId(null)
+    }
+  }
+
   async function toggle(id: string, current: string) {
     const next = current === 'done' ? 'open' : 'done'
     const { error } = await supabase.from('follow_ups').update({
@@ -324,15 +380,27 @@ export function FollowUpsClient({
           </div>
         )}
         {tab === 'open' && (
-          <Button
-            onClick={runDetectCommitments}
-            disabled={detectingCommitments}
-            className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
-            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
-          >
-            {detectingCommitments ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            {detectingCommitments ? 'A analisar…' : 'Detetar compromissos'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={suggestFollowUps}
+              disabled={suggestingFollowUps}
+              variant="outline"
+              className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+            >
+              {suggestingFollowUps ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {suggestingFollowUps ? 'A analisar…' : 'Sugerir follow-ups'}
+            </Button>
+            <Button
+              onClick={runDetectCommitments}
+              disabled={detectingCommitments}
+              className="h-9 gap-1.5 rounded-lg text-[13px] font-medium"
+              style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+            >
+              {detectingCommitments ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {detectingCommitments ? 'A analisar…' : 'Detetar compromissos'}
+            </Button>
+          </div>
         )}
       </div>
 
@@ -475,6 +543,62 @@ export function FollowUpsClient({
       {/* Open follow-ups */}
       {tab === 'open' && (
         <div className="space-y-6">
+          {/* AI global follow-up suggestions */}
+          {followUpSuggestions.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 px-1">
+                <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--primary)' }} />
+                <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--primary)' }}>
+                  Sugestões IA · {followUpSuggestions.length}
+                </span>
+              </div>
+              {followUpSuggestions.map((s) => {
+                const ps = PRIORITY_STYLES[s.priority]
+                return (
+                  <div
+                    key={s.customer_id}
+                    className="flex items-start gap-3 rounded-xl p-4"
+                    style={{ background: 'var(--card)', border: '1px solid rgba(91,91,214,0.25)', boxShadow: 'var(--shadow-card)' }}
+                  >
+                    <Sparkles className="h-4 w-4 mt-0.5 shrink-0" style={{ color: 'var(--primary)' }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+                        {s.title}
+                      </p>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                        {s.customer_name}{s.customer_company ? ` · ${s.customer_company}` : ''}
+                      </p>
+                      <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                        {s.description}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[11px] font-medium rounded-full px-2 py-0.5" style={{ background: ps.bg, color: ps.text }}>
+                        {s.priority}
+                      </span>
+                      <Button
+                        onClick={() => createFollowUpFromGlobalSuggestion(s)}
+                        disabled={creatingGlobalFollowUpId === s.customer_id}
+                        className="h-7 rounded-lg text-[12px] font-medium px-3"
+                        style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+                      >
+                        {creatingGlobalFollowUpId === s.customer_id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Criar'}
+                      </Button>
+                      <button
+                        onClick={() => setFollowUpSuggestions((prev) => prev.filter((x) => x.customer_id !== s.customer_id))}
+                        className="h-7 w-7 flex items-center justify-center rounded-lg transition-opacity hover:opacity-70"
+                        style={{ color: 'var(--muted-foreground)' }}
+                        title="Dispensar sugestão"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
           {/* AI commitment suggestions */}
           {commitmentSuggestions.length > 0 && (
             <div className="space-y-2">
@@ -524,7 +648,7 @@ export function FollowUpsClient({
             </div>
           )}
 
-          {openCount === 0 && commitmentSuggestions.length === 0 && (
+          {openCount === 0 && commitmentSuggestions.length === 0 && followUpSuggestions.length === 0 && (
             <div className="rounded-xl p-8 text-center" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
               <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>Sem follow-ups abertos. 🎉</p>
             </div>

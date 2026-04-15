@@ -7,19 +7,51 @@ import { CustomerDetailClient } from '@/components/customer-detail-client'
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  const [customerRes, interactionsRes, followUpsRes, ticketsRes] = await Promise.all([
+  const [customerRes, followUpsRes, ticketsRes] = await Promise.all([
     supabase.from('customers').select('*, customer_identifiers(*)').eq('id', id).single(),
-    supabase.from('interactions').select('*').eq('customer_id', id).order('occurred_at', { ascending: false }),
     supabase.from('follow_ups').select('*').eq('customer_id', id).order('due_date', { ascending: true }),
     supabase.from('tickets').select('*').eq('customer_id', id).order('created_at', { ascending: false }),
   ])
 
   if (!customerRes.data) notFound()
 
+  // Primary: interactions directly linked to this customer
+  const { data: primaryInteractions } = await supabase
+    .from('interactions')
+    .select('*')
+    .eq('customer_id', id)
+    .order('occurred_at', { ascending: false })
+
+  // Secondary: interactions from OTHER customers matched by any of this customer's email identifiers
+  // Catches emails synced before the identifier was registered (or auto-created duplicates not yet re-linked)
+  const emailValues = (customerRes.data.customer_identifiers ?? [])
+    .filter((i: { type: string }) => i.type === 'email')
+    .map((i: { value: string }) => i.value)
+
+  let secondaryInteractions: typeof primaryInteractions = []
+  if (emailValues.length > 0) {
+    const results = await Promise.all(
+      emailValues.map((email: string) =>
+        supabase
+          .from('interactions')
+          .select('*')
+          .eq('metadata->>matched_email', email)
+          .neq('customer_id', id)
+      )
+    )
+    secondaryInteractions = results.flatMap((r) => r.data ?? [])
+  }
+
+  // Merge + deduplicate + sort newest-first
+  const seenIds = new Set<string>()
+  const allInteractions = [...(primaryInteractions ?? []), ...(secondaryInteractions ?? [])]
+    .filter((i) => { if (seenIds.has(i.id)) return false; seenIds.add(i.id); return true })
+    .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
+
   return (
     <CustomerDetailClient
       customer={customerRes.data}
-      interactions={interactionsRes.data ?? []}
+      interactions={allInteractions}
       followUps={followUpsRes.data ?? []}
       tickets={ticketsRes.data ?? []}
     />

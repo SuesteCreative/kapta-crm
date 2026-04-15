@@ -143,9 +143,21 @@ export async function GET() {
   try {
     await client.connect()
 
+    // Discover Sent folder using SPECIAL-USE flag (most reliable across servers)
+    // Fallback: try common folder names
+    let sentPath = 'Sent'
+    try {
+      const allBoxes = await client.list()
+      const sentBox = allBoxes.find((b) =>
+        (b as unknown as Record<string, unknown>).specialUse === '\\Sent' ||
+        /^(sent|sent messages|sent items|\[gmail\]\/sent mail|gesendet|éléments envoyés)$/i.test(b.name)
+      )
+      if (sentBox) sentPath = sentBox.path
+    } catch { /* list failed — keep default */ }
+
     const mailboxes: { path: string; direction: 'inbound' | 'outbound' }[] = [
-      { path: 'INBOX', direction: 'inbound' },
-      { path: 'Sent',  direction: 'outbound' },
+      { path: 'INBOX',   direction: 'inbound' },
+      { path: sentPath,  direction: 'outbound' },
     ]
 
     for (const { path, direction } of mailboxes) {

@@ -102,7 +102,7 @@ ${sigHtml ? `<br><br>${sigHtml}` : ''}
 
   // Log as outbound interaction (store plain text for readability in CRM)
   const supabase = createServiceClient()
-  await supabase.from('interactions').insert({
+  const { error: insertError } = await supabase.from('interactions').insert({
     customer_id,
     type: 'email',
     direction: 'outbound',
@@ -112,6 +112,7 @@ ${sigHtml ? `<br><br>${sigHtml}` : ''}
     metadata: { source: 'crm', cc: cc ?? null, bcc: bcc ?? null },
     occurred_at: new Date().toISOString(),
   })
+  if (insertError) console.error('Failed to log sent email interaction:', insertError.message)
 
   return NextResponse.json({ ok: true, messageId })
 }

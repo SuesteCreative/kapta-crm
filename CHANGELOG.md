@@ -4,6 +4,48 @@
 
 ## [Unreleased] — Abril 2026
 
+### Timeline Composta — Múltiplos Emails por Cliente
+- A timeline de cada cliente agrega interações de **todos os emails registados** no cliente (não apenas as ligadas por `customer_id`)
+- Emails sincronizados antes de um endereço alternativo ser adicionado continuam a aparecer na timeline correta
+- Deduplicação por ID garante que nenhuma interação aparece duplicada
+- Ordenação por data mantida após merge das fontes
+
+### Re-ligação Automática de Interações ao Adicionar Email
+- Ao adicionar um identificador de email a um cliente, o CRM verifica automaticamente se existem interações noutros clientes associadas a esse endereço
+- **Verificação de conflito**: se o email já estiver registado noutro cliente, mostra aviso e não move nada
+- **Pré-visualização**: mostra quantas interações seriam movidas e de que clientes, antes de fazer qualquer alteração
+- **Diálogo de confirmação** (design system Shadcn — sem `window.confirm`) para o utilizador aprovar a migração
+- **Detecção de órfãos**: após re-ligação, identifica clientes duplicados auto-criados que ficaram sem interações, tickets ou follow-ups — alerta para eliminação manual
+- Nova rota `POST /api/customers/[id]/relink-identifier` com modos `preview` e `confirm`
+
+### AI — Sugestão Global de Follow-ups
+- Nova rota `POST /api/ai/suggest-follow-ups-global` analisa os emails inbound dos últimos 30 dias e sugere a ação mais importante por cliente
+- Exclui automaticamente clientes que já têm follow-up aberto
+- Botão **"Sugerir follow-ups"** na página de Follow-ups; cards de sugestão com prioridade, descrição e botão "Criar"
+- Usa `claude-haiku-4-5` com prompt cacheado (rápido e económico)
+
+### AI — Sugestão Global de Tickets
+- Nova rota `POST /api/ai/suggest-tickets-global` analisa os emails inbound dos últimos 45 dias e identifica clientes com problemas não resolvidos
+- Exclui clientes com ticket aberto/em progresso criado nos últimos 14 dias
+- Botão **"Analisar com IA"** na página de Tickets; secção colapsável "Sugestões IA" com tags, prioridade e botão "Criar ticket"
+
+### Fix — Sincronização da Pasta Sent (Outlook / Exchange)
+- IMAP sync usava caminho fixo `'Sent'` para a pasta de enviados — Outlook usa `'Sent Items'`, causando falha silenciosa
+- Deteção automática via flag IMAP `SPECIAL-USE \Sent` (RFC 6154), com fallback por regex para nomes comuns em PT/EN/DE/FR
+- Corrigido em `sync/route.ts` e `sync-customer/route.ts`
+
+### Fix — Filtro de Spam com Metadata NULL
+- `.not('metadata->>is_spam', 'eq', 'true')` excluía todos os emails com `metadata = NULL` (a maioria) — bug crítico que mostrava 0 emails
+- Filtro movido para JavaScript (`e.metadata?.is_spam !== true`) em todos os componentes e rotas afetadas
+
+### Fix — Overwrite de Metadata ao Marcar Spam
+- Operações de dismiss/spam sobrescreviam `metadata` completo (perdiam `attachments`, `cc`, `bcc`, `ai_triage`)
+- Corrigido: spread do metadata existente antes de definir `is_spam: true`
+
+### Fix — Log Silencioso no Envio de Email
+- `/api/email/send` não verificava erro do insert em `interactions` após envio SMTP
+- Adicionado log de erro explícito quando o registo da interação falha
+
 ### Autenticação simples (sem Clerk)
 - Login com email + password (`pedro@kapta.pt`)
 - `proxy.ts` (Next.js 16 — substitui `middleware.ts`) protege todas as rotas
