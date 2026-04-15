@@ -151,11 +151,15 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
   async function deleteCustomer() {
     setDeletingCustomer(true)
     try {
-      // Explicit cascade — delete related records first, then the customer
-      await supabase.from('interactions').delete().eq('customer_id', customer.id)
-      await supabase.from('follow_ups').delete().eq('customer_id', customer.id)
-      await supabase.from('tickets').delete().eq('customer_id', customer.id)
-      await supabase.from('customer_identifiers').delete().eq('customer_id', customer.id)
+      // Delete child records in parallel, then the customer
+      const [r1, r2, r3, r4] = await Promise.all([
+        supabase.from('interactions').delete().eq('customer_id', customer.id),
+        supabase.from('follow_ups').delete().eq('customer_id', customer.id),
+        supabase.from('tickets').delete().eq('customer_id', customer.id),
+        supabase.from('customer_identifiers').delete().eq('customer_id', customer.id),
+      ])
+      const childError = r1.error ?? r2.error ?? r3.error ?? r4.error
+      if (childError) throw childError
       const { error } = await supabase.from('customers').delete().eq('id', customer.id)
       if (error) throw error
       toast.success(`${customer.name} eliminado.`)

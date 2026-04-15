@@ -4,6 +4,30 @@
 
 ## [Unreleased] — Abril 2026
 
+### Eliminar Cliente
+- Botão de eliminar (ícone vermelho) no header da página do cliente
+- Diálogo de confirmação com aviso explícito de irreversibilidade
+- Apaga em paralelo todas as interações, follow-ups, tickets e identificadores antes de apagar o cliente
+- Redireciona para a lista de clientes após eliminação
+
+### Fix — Sincronização IMAP Mais Rápida (Filtro SINCE)
+- Sync global passou a usar `SINCE 90 dias` em vez de `1:*` — evita descarregar mensagens já processadas em cada execução
+- Primeira sync após esta versão notavelmente mais rápida em caixas com histórico longo
+
+### Fix — Auto-criação de Leads para Remetentes Automáticos
+- Emails de `noreply`, `mailer-daemon`, `newsletter`, `bounce`, `unsubscribe`, etc. já não criam leads automaticamente
+- Estes remetentes são agora contabilizados em `skipped_unknown_outbound` e ignorados
+
+### Fix Raiz — Criação de Duplicados em Sync Outbound
+- Removida auto-criação de clientes para destinatários outbound desconhecidos (era a causa de todos os duplicados tipo "Joao Sarmento")
+- Se o endereço TO de um email enviado não está no CRM, o email é ignorado — o utilizador adiciona o cliente manualmente
+
+### Resolver Interações Mal-ligadas (Global)
+- Nova rota `POST /api/customers/relink-all` varre todas as interações cujo `matched_email` pertence a um cliente diferente do `customer_id`
+- Modos `preview` (conta sem alterar) e `confirm` (executa a migração)
+- Deteta clientes órfãos após a migração (0 interações + 0 tickets + 0 follow-ups)
+- Botão **"Verificar e corrigir"** em Definições com fluxo preview → confirmação
+
 ### Timeline Composta — Múltiplos Emails por Cliente
 - A timeline de cada cliente agrega interações de **todos os emails registados** no cliente (não apenas as ligadas por `customer_id`)
 - Emails sincronizados antes de um endereço alternativo ser adicionado continuam a aparecer na timeline correta
