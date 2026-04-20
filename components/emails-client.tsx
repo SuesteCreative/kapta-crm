@@ -4,12 +4,14 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Mail, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
-  ExternalLink, Paperclip,
+  ExternalLink, Paperclip, Reply,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
+import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
+import type { Interaction, CustomerIdentifier } from '@/lib/database.types'
 
 interface Attachment {
   name?: string
@@ -31,7 +33,18 @@ interface EmailRow {
     id: string
     name: string
     company: string | null
+    customer_identifiers?: CustomerIdentifier[]
   } | null
+}
+
+interface ReplyContext {
+  customerId: string
+  customerName: string
+  customerCompany: string | null
+  customerEmail: string
+  initialSubject: string
+  interactions: Interaction[]
+  allEmails: EmailContact[]
 }
 
 const DIRECTION_FILTERS = [
@@ -73,6 +86,47 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [syncing, setSyncing]           = useState(false)
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
   const [selectedId, setSelectedId]     = useState<string | null>(null)
+  const [replyOpen, setReplyOpen]       = useState(false)
+  const [replyCtx, setReplyCtx]         = useState<ReplyContext | null>(null)
+  const [replyLoading, setReplyLoading] = useState(false)
+
+  async function openReply(email: EmailRow) {
+    const matched = email.metadata?.matched_email as string | undefined
+    const identifiers = email.customers?.customer_identifiers ?? []
+    const emailIds = identifiers.filter((i) => i.type === 'email')
+    const customerEmail = matched ?? emailIds[0]?.value ?? ''
+
+    if (!customerEmail) {
+      toast.error('Cliente sem email registado.')
+      return
+    }
+
+    const rawSubject = email.subject ?? ''
+    const initialSubject = /^re:/i.test(rawSubject) ? rawSubject : (rawSubject ? `Re: ${rawSubject}` : '')
+
+    setReplyLoading(true)
+    try {
+      const { data: interactions } = await supabase
+        .from('interactions')
+        .select('*')
+        .eq('customer_id', email.customer_id)
+        .order('occurred_at', { ascending: false })
+        .limit(20)
+
+      setReplyCtx({
+        customerId: email.customer_id,
+        customerName: email.customers?.name ?? '',
+        customerCompany: email.customers?.company ?? null,
+        customerEmail,
+        initialSubject,
+        interactions: (interactions ?? []) as Interaction[],
+        allEmails: emailIds.map((i) => ({ label: i.value, email: i.value })),
+      })
+      setReplyOpen(true)
+    } finally {
+      setReplyLoading(false)
+    }
+  }
 
   async function dismissEmail(id: string, currentMetadata: Record<string, unknown> | null) {
     setDismissedIds((prev) => new Set([...prev, id]))
@@ -327,6 +381,18 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button
+                      onClick={() => openReply(selected)}
+                      disabled={replyLoading}
+                      className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70 disabled:opacity-40"
+                      style={{ background: 'var(--foreground)', color: 'var(--card)' }}
+                      title="Responder"
+                    >
+                      {replyLoading
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <Reply className="h-3 w-3" />}
+                      Responder
+                    </button>
+                    <button
                       onClick={() => router.push(`/customers/${selected.customer_id}`)}
                       className="rounded p-1.5 hover:bg-[var(--border)]"
                       title="Abrir cliente"
@@ -422,6 +488,20 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
           })()}
         </div>
       </div>
+
+      {replyCtx && (
+        <SendEmailDialog
+          open={replyOpen}
+          customerId={replyCtx.customerId}
+          customerEmail={replyCtx.customerEmail}
+          customerName={replyCtx.customerName}
+          customerCompany={replyCtx.customerCompany}
+          interactions={replyCtx.interactions}
+          allEmails={replyCtx.allEmails}
+          initialSubject={replyCtx.initialSubject}
+          onClose={() => setReplyOpen(false)}
+        />
+      )}
     </div>
   )
 }

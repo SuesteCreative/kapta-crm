@@ -26,6 +26,8 @@ interface Props {
   interactions?: Interaction[]
   /** All known contacts for this customer / company — shown as quick-add chips */
   allEmails?: EmailContact[]
+  /** Pre-fill the subject when dialog opens (e.g. "Re: ..." on reply) */
+  initialSubject?: string
   onClose: () => void
 }
 
@@ -143,6 +145,7 @@ export function SendEmailDialog({
   customerCompany,
   interactions = [],
   allEmails = [],
+  initialSubject,
   onClose,
 }: Props) {
   const [to,          setTo]          = useState(customerEmail)
@@ -162,7 +165,7 @@ export function SendEmailDialog({
 
   useEffect(() => {
     if (!open) return
-    setSubject('')
+    setSubject(initialSubject ?? '')
     setBody('')
     setCc('')
     setBcc('')
