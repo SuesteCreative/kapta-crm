@@ -4,6 +4,18 @@
 
 ## [Unreleased] — Abril 2026
 
+### Renderização de HTML nos Emails (Tabelas, Listas, Links)
+- Sync guarda `parsed.html` em `metadata.html` (cap a 100KB) além do texto plano
+- Novo componente `EmailHtmlViewer` usa `DOMPurify` para sanitizar e renderizar HTML seguro (strip de `<script>`, `<iframe>`, event handlers, forms)
+- Preview em `/emails` renderiza HTML quando disponível; fallback para texto plano
+- Timeline do cliente renderiza HTML quando o email está expandido ("Ver mais"); colapsado mantém texto truncado
+- Resolve problema de tabelas achatadas (ex: lista "Charge 22% VAT" da Susana — colunas voltam a aparecer como tabela)
+
+### Recuperação de Anexos e HTML via Re-parse IMAP
+- Novo endpoint `POST /api/imap/reparse` re-busca emails já síncrados via IMAP `HEADER Message-ID`, re-processa com `mailparser` e recupera anexos + HTML em rows com `metadata.parsed_version != 'mailparser-1'`
+- Preserva metadados existentes (`ai_triage`, `is_spam`, etc) via merge
+- Sem botão UI ainda — chamar via `fetch('/api/imap/reparse', { method: 'POST' })` com sessão válida
+
 ### Fix — Sync de Team-Forwards (Bruno / site@ para Pedro)
 - Sync IMAP não capturava emails onde FROM=@kapta.pt e TO=@kapta.pt — ambas as pontas internas → envelope sem endereço externo → interação perdida
 - Body-parse do `From:` reencaminhado era corrido apenas para outbound; agora também em inbound quando `allFromAreTeam` e sem `primarySenderEmail`

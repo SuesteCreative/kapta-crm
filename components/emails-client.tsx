@@ -11,6 +11,7 @@ import { formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
+import { EmailHtmlViewer } from '@/components/email-html-viewer'
 import type { Interaction, CustomerIdentifier } from '@/lib/database.types'
 
 interface Attachment {
@@ -355,6 +356,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
             const cc          = selected.metadata?.cc  as string | null | undefined
             const bcc         = selected.metadata?.bcc as string | null | undefined
             const attachments = (selected.metadata?.attachments as Attachment[] | undefined) ?? []
+            const htmlBody    = selected.metadata?.html as string | undefined
             const body        = selected.content ? stripHtml(selected.content) : ''
 
             return (
@@ -470,18 +472,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
 
                 {/* Body */}
                 <div className="px-5 py-4 overflow-auto flex-1">
-                  {body ? (
-                    <pre
-                      className="text-[13px] whitespace-pre-wrap break-words font-sans leading-relaxed"
-                      style={{ color: 'var(--foreground)' }}
-                    >
-                      {body}
-                    </pre>
-                  ) : (
-                    <p className="text-[13px] italic" style={{ color: 'var(--muted-foreground)' }}>
-                      (sem corpo)
-                    </p>
-                  )}
+                  <EmailHtmlViewer html={htmlBody} text={body} />
                 </div>
               </div>
             )

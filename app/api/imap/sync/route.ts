@@ -299,6 +299,7 @@ export async function GET(req: NextRequest) {
           }
 
           const bodyText = (parsed.text ?? '').trim().slice(0, 4000)
+          const bodyHtml = typeof parsed.html === 'string' ? parsed.html.slice(0, 100000) : null
 
           // Team-forward inbound: FROM=@kapta.pt, TO=@kapta.pt — no external address in envelope.
           // Parse forwarded body to recover the original sender (e.g. Bruno fwd Petstourism to Pedro).
@@ -378,7 +379,11 @@ export async function GET(req: NextRequest) {
             subject,
             content:     bodyText || null,
             source_id:   messageId,
-            metadata:    { matched_email: matchedEmail },
+            metadata:    {
+              matched_email: matchedEmail,
+              parsed_version: 'mailparser-1',
+              ...(bodyHtml ? { html: bodyHtml } : {}),
+            },
             occurred_at: date.toISOString(),
           })
 
@@ -440,9 +445,16 @@ export async function GET(req: NextRequest) {
             }
 
             if (attachments.length > 0) {
+              // Preserve html set during buffer push; read back and merge
+              const { data: existing } = await supabase
+                .from('interactions')
+                .select('metadata')
+                .eq('source_id', work.sourceId)
+                .maybeSingle()
+              const prev = (existing?.metadata as Record<string, unknown> | null) ?? {}
               await supabase
                 .from('interactions')
-                .update({ metadata: { matched_email: work.matchedEmail, attachments } })
+                .update({ metadata: { ...prev, matched_email: work.matchedEmail, attachments, parsed_version: 'mailparser-1' } })
                 .eq('source_id', work.sourceId)
             }
           }

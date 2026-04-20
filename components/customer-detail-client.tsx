@@ -26,6 +26,7 @@ import { BubblesVideoModal } from '@/components/bubbles-video-modal'
 import { PasteConversationDialog } from '@/components/paste-conversation-dialog'
 import { SendEmailDialog } from '@/components/send-email-dialog'
 import { OnboardingDialog } from '@/components/onboarding-dialog'
+import { EmailHtmlViewer } from '@/components/email-html-viewer'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
@@ -633,6 +634,9 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                       const displayText = isLong && !isExpanded ? cleaned.slice(0, TRUNCATE_LEN) + '…' : cleaned
                       const bullets = summaries.get(i.id)
                       const isSummarizing = summarizing.has(i.id)
+                      const htmlBody = isEmail && isExpanded
+                        ? ((i.metadata as Record<string, unknown> | null)?.html as string | undefined)
+                        : undefined
 
                       return (
                         <div className="space-y-2">
@@ -648,12 +652,16 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                             </ul>
                           )}
 
-                          <p
-                            className="text-sm leading-relaxed whitespace-pre-wrap"
-                            style={{ color: 'var(--muted-foreground)' }}
-                          >
-                            {displayText}
-                          </p>
+                          {htmlBody ? (
+                            <EmailHtmlViewer html={htmlBody} text={cleaned} />
+                          ) : (
+                            <p
+                              className="text-sm leading-relaxed whitespace-pre-wrap"
+                              style={{ color: 'var(--muted-foreground)' }}
+                            >
+                              {displayText}
+                            </p>
+                          )}
 
                           {/* Expand / AI button row */}
                           <div className="flex items-center gap-2">
