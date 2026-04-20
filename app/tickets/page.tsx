@@ -1,9 +1,10 @@
 export const dynamic = 'force-dynamic'
 
-import { supabase } from '@/lib/supabase'
+import { createServiceClient } from '@/lib/supabase'
 import { TicketsClient } from '@/components/tickets-client'
 
 export default async function TicketsPage() {
+  const supabase = createServiceClient()
   const { data } = await supabase
     .from('tickets')
     .select('*, customers(id, name, company, plan, status, customer_identifiers(type, value, is_primary))')

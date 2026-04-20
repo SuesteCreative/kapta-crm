@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic'
 
-import { supabase } from '@/lib/supabase'
+import { createServiceClient } from '@/lib/supabase'
 import { DashboardClient } from '@/components/dashboard-client'
 
 type RawEmail = {
@@ -16,6 +16,7 @@ type RawEmail = {
 const PRIO_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
 
 async function getDashboardData() {
+  const supabase = createServiceClient()
   const today = new Date().toISOString().split('T')[0]
 
   const [overdueRes, todayRes, customersRes, openTicketsRes, emailsRes] = await Promise.all([

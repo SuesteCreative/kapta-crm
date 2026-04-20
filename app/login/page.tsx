@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -21,6 +22,13 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       })
       if (res.ok) {
+        const data = await res.json()
+        if (data.access_token && data.refresh_token) {
+          await supabase.auth.setSession({
+            access_token: data.access_token,
+            refresh_token: data.refresh_token,
+          })
+        }
         router.push('/')
         router.refresh()
       } else {

@@ -1,11 +1,12 @@
 export const dynamic = 'force-dynamic'
 
 import { notFound } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { createServiceClient } from '@/lib/supabase'
 import { CustomerDetailClient } from '@/components/customer-detail-client'
 
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  const supabase = createServiceClient()
 
   const [customerRes, followUpsRes, ticketsRes] = await Promise.all([
     supabase.from('customers').select('*, customer_identifiers(*)').eq('id', id).single(),

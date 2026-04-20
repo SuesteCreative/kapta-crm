@@ -1,9 +1,10 @@
 export const dynamic = 'force-dynamic'
 
-import { supabase } from '@/lib/supabase'
+import { createServiceClient } from '@/lib/supabase'
 import { FollowUpsClient } from '@/components/follow-ups-client'
 
 export default async function FollowUpsPage() {
+  const supabase = createServiceClient()
   // Manual follow-ups
   const { data: followUps } = await supabase
     .from('follow_ups')

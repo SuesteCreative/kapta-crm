@@ -1,9 +1,10 @@
 export const dynamic = 'force-dynamic'
 
-import { supabase } from '@/lib/supabase'
+import { createServiceClient } from '@/lib/supabase'
 import { SettingsClient } from '@/components/settings-client'
 
 export default async function SettingsPage() {
+  const supabase = createServiceClient()
   const { data } = await supabase
     .from('templates')
     .select('body')
