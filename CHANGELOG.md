@@ -9,10 +9,11 @@
 - Body-parse do `From:` reencaminhado era corrido apenas para outbound; agora também em inbound quando `allFromAreTeam` e sem `primarySenderEmail`
 - Bruno reencaminhar email de petstourism.com para Pedro → CRM deteta "info@petstourism.com" no body → auto-cria lead + guarda como inbound
 
-### Backfill — Correção de Encoding em Emails Antigos
-- Novo endpoint `POST /api/imap/backfill-content` (preview/confirm) re-descodifica interações com conteúdo legado: boundaries MIME `--_000_…` + quoted-printable `=C3=A7`
+### Auto-Sanitize de Encoding em Cada Sync
+- Sync IMAP agora inclui passo de auto-descodificação: no início de cada execução, varre até 500 emails com sinais de conteúdo legado (`=C3=` presente + boundary MIME) e re-descodifica in-place
 - Helper puro `lib/decode-legacy-email.ts` (TextDecoder — funciona browser + Node): extrai secção `text/plain` e resolve sequências hex UTF-8
-- Botão **"Verificar e corrigir"** em Definições com fluxo preview → confirmação; idempotente (emails já limpos são saltados pelo `looksLikeLegacyEmail`)
+- Idempotente — rows já limpos são saltados pelo `looksLikeLegacyEmail`; após 1-2 syncs todos os emails ficam UTF-8 legível
+- Sem botão manual / endpoint separado — acontece silenciosamente. Resposta de sync reporta `legacy_fixed: N`
 
 ### Fix Raiz — Parse MIME Correto (Outlook, Quoted-Printable, Charsets)
 - Sync IMAP usava `bodyParts: ['1']` que para emails multipart (Outlook) retorna o container MIME com boundaries e headers — causava conteúdo tipo `--_000_GVTP...Content-Type: text/plain` a aparecer na timeline

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
-import { Save, Eye, Code, Link2, Brain, Wrench } from 'lucide-react'
+import { Save, Eye, Code, Link2, Brain } from 'lucide-react'
 
 const DEFAULT_SIGNATURE_HTML = `<div style="font-family:Arial,Helvetica,sans-serif;color:#2d2d2d;font-size:13px;line-height:1.6;border-top:2px solid #c0272b;padding-top:14px;margin-top:8px;max-width:480px;">
 
@@ -56,49 +56,6 @@ export function SettingsClient({ initialSignature, initialMemory }: Props) {
   const [mode, setMode] = useState<'preview' | 'code'>('preview')
   const [relinking, setRelinking] = useState(false)
   const [relinkPreview, setRelinkPreview] = useState<{ total: number; groups: number } | null>(null)
-  const [backfilling, setBackfilling] = useState(false)
-  const [backfillPreview, setBackfillPreview] = useState<{ scanned: number; affected: number } | null>(null)
-
-  async function handleBackfillPreview() {
-    setBackfilling(true)
-    try {
-      const res = await fetch('/api/imap/backfill-content', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preview: true }),
-      })
-      const data = await res.json()
-      if (!data.ok) { toast.error(data.error ?? 'Erro.'); return }
-      if (data.affected === 0) {
-        toast.success('Nenhum email com encoding partido encontrado.')
-        return
-      }
-      setBackfillPreview({ scanned: data.scanned, affected: data.affected })
-    } catch {
-      toast.error('Erro ao verificar emails.')
-    } finally {
-      setBackfilling(false)
-    }
-  }
-
-  async function handleBackfillConfirm() {
-    setBackfilling(true)
-    try {
-      const res = await fetch('/api/imap/backfill-content', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      const data = await res.json()
-      if (!data.ok) { toast.error(data.error ?? 'Erro.'); return }
-      toast.success(`${data.updated} email(s) corrigidos.`)
-    } catch {
-      toast.error('Erro ao corrigir emails.')
-    } finally {
-      setBackfilling(false)
-      setBackfillPreview(null)
-    }
-  }
 
   async function handleSaveMemory() {
     setSavingMemory(true)
@@ -267,61 +224,6 @@ export function SettingsClient({ initialSignature, initialMemory }: Props) {
           >
             <Link2 className="h-3.5 w-3.5" />
             {relinking ? 'A verificar…' : 'Verificar e corrigir'}
-          </Button>
-        )}
-      </div>
-
-      {/* Backfill content card */}
-      <div
-        className="rounded-xl p-6 space-y-3"
-        style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
-      >
-        <div className="flex items-start gap-2">
-          <Wrench className="h-4 w-4 mt-0.5" style={{ color: 'var(--primary)' }} />
-          <div>
-            <h2 className="text-[15px] font-semibold" style={{ color: 'var(--foreground)' }}>
-              Corrigir encoding de emails antigos
-            </h2>
-            <p className="text-[13px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-              Re-descodifica emails sincronizados antes do fix MIME — boundaries <code>--_000_…</code> e sequências <code>=C3=A7</code> voltam a aparecer como texto legível. Seguro e idempotente.
-            </p>
-          </div>
-        </div>
-
-        {backfillPreview ? (
-          <div className="space-y-3">
-            <p className="text-[13px]" style={{ color: 'var(--foreground)' }}>
-              <strong>{backfillPreview.affected}</strong> email(s) com encoding partido em <strong>{backfillPreview.scanned}</strong> verificados. Corrigir?
-            </p>
-            <div className="flex gap-2">
-              <Button
-                onClick={handleBackfillConfirm}
-                disabled={backfilling}
-                className="gap-2 rounded-lg text-[13px] font-medium"
-                style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
-              >
-                <Wrench className="h-3.5 w-3.5" />
-                {backfilling ? 'A corrigir…' : 'Confirmar correção'}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setBackfillPreview(null)}
-                disabled={backfilling}
-                className="rounded-lg text-[13px]"
-              >
-                Cancelar
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button
-            onClick={handleBackfillPreview}
-            disabled={backfilling}
-            variant="outline"
-            className="gap-2 rounded-lg text-[13px] font-medium"
-          >
-            <Wrench className="h-3.5 w-3.5" />
-            {backfilling ? 'A verificar…' : 'Verificar e corrigir'}
           </Button>
         )}
       </div>

@@ -3,6 +3,7 @@ import { ImapFlow } from 'imapflow'
 import { simpleParser, ParsedMail } from 'mailparser'
 import { createServiceClient } from '@/lib/supabase'
 import { analyzeAttachment } from '@/lib/analyze-attachment'
+import { decodeLegacyEmailContent, looksLikeLegacyEmail } from '@/lib/decode-legacy-email'
 import { randomUUID } from 'crypto'
 
 export const dynamic = 'force-dynamic'
@@ -133,6 +134,38 @@ export async function GET(req: NextRequest) {
   let skipped = 0
   let unknown = 0
   let created = 0
+  let legacyFixed = 0
+
+  // Auto-fix legacy rows: emails stored before the mailparser switch still
+  // carry raw MIME boundaries and quoted-printable =XX runs. Decoder is a
+  // pure string transform, idempotent — rows already clean are skipped.
+  try {
+    const { data: legacyRows } = await supabase
+      .from('interactions')
+      .select('id, content')
+      .eq('type', 'email')
+      .not('content', 'is', null)
+      .ilike('content', '%=C3=%')
+      .limit(500)
+
+    const updates: Array<{ id: string; content: string }> = []
+    for (const r of legacyRows ?? []) {
+      if (!r.content || !looksLikeLegacyEmail(r.content)) continue
+      const decoded = decodeLegacyEmailContent(r.content)
+      if (decoded && decoded !== r.content) updates.push({ id: r.id, content: decoded })
+    }
+    for (let i = 0; i < updates.length; i += 20) {
+      const chunk = updates.slice(i, i + 20)
+      await Promise.all(
+        chunk.map((u) =>
+          supabase.from('interactions').update({ content: u.content }).eq('id', u.id)
+        )
+      )
+      legacyFixed += chunk.length
+    }
+  } catch (err) {
+    console.error('Legacy auto-fix failed (non-blocking):', err)
+  }
 
   type NewInteraction = {
     customer_id: string
@@ -427,7 +460,8 @@ export async function GET(req: NextRequest) {
       created_leads: created,
       skipped_duplicate: skipped,
       skipped_unknown_outbound: unknown,
-      message: `${synced} imported, ${created} new leads, ${skipped} duplicates, ${unknown} unknown outbound`,
+      legacy_fixed: legacyFixed,
+      message: `${synced} imported, ${created} new leads, ${skipped} duplicates, ${unknown} unknown outbound, ${legacyFixed} legacy decoded`,
     })
   } catch (error) {
     const host = process.env.IMAP_HOST ?? '(not set)'
