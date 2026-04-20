@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase'
+import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -82,6 +83,8 @@ export async function POST() {
     return `${i + 1}. ${label} [customer_id: ${e.customer_id}]\n   Date: ${e.occurred_at.slice(0, 10)} | Subject: ${e.subject ?? '(sem assunto)'}\n   ${body}`
   }).join('\n\n')
 
+  const memory = await getAiMemory()
+
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
   let message
@@ -89,7 +92,7 @@ export async function POST() {
     message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 800,
-      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: `${SYSTEM_PROMPT}${memorySystemBlock(memory)}`, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Suggest follow-ups for these customers:\n\n${itemsText}` }],
     })
   } catch (err) {

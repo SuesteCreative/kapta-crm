@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -71,6 +72,8 @@ Assunto: ${i.subject ?? '(sem assunto)'}
 ${body}`
   }).join('\n\n---\n\n')
 
+  const memory = await getAiMemory()
+
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
   let message
@@ -78,7 +81,7 @@ ${body}`
     message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 512,
-      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: `${SYSTEM_PROMPT}${memorySystemBlock(memory)}`, cache_control: { type: 'ephemeral' } }],
       messages: [{
         role: 'user',
         content: `Customer: ${customer_name}${customer_company ? ` (${customer_company})` : ''}\n\nConversation:\n\n${thread}`,

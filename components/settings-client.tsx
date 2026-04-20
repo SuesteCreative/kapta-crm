@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
-import { Save, Eye, Code, Link2 } from 'lucide-react'
+import { Save, Eye, Code, Link2, Brain } from 'lucide-react'
 
 const DEFAULT_SIGNATURE_HTML = `<div style="font-family:Arial,Helvetica,sans-serif;color:#2d2d2d;font-size:13px;line-height:1.6;border-top:2px solid #c0272b;padding-top:14px;margin-top:8px;max-width:480px;">
 
@@ -29,16 +29,64 @@ const DEFAULT_SIGNATURE_HTML = `<div style="font-family:Arial,Helvetica,sans-ser
 
 </div>`
 
+const DEFAULT_AI_MEMORY = `## Integrações
+- (ex) Stripe: webhook em /api/stripe/webhook; erros comuns de IVA aparecem quando...
+
+## Troubleshoots recorrentes
+- (ex) Duplicados IMO Portugal → conflito de identifier, usar /api/customers/relink-all
+
+## Tom e estilo
+- (ex) Português europeu sempre; "cumprimentos" e não "saudações"
+- (ex) Técnico mas acessível; evita jargão desnecessário
+
+## Clientes chave
+- (ex) Bruno (noreply@...): sempre responder em 24h
+`
+
 interface Props {
   initialSignature: string
+  initialMemory: string
 }
 
-export function SettingsClient({ initialSignature }: Props) {
+export function SettingsClient({ initialSignature, initialMemory }: Props) {
   const [html, setHtml] = useState(initialSignature || DEFAULT_SIGNATURE_HTML)
+  const [memory, setMemory] = useState(initialMemory || DEFAULT_AI_MEMORY)
+  const [savingMemory, setSavingMemory] = useState(false)
   const [saving, setSaving] = useState(false)
   const [mode, setMode] = useState<'preview' | 'code'>('preview')
   const [relinking, setRelinking] = useState(false)
   const [relinkPreview, setRelinkPreview] = useState<{ total: number; groups: number } | null>(null)
+
+  async function handleSaveMemory() {
+    setSavingMemory(true)
+    try {
+      const { data: existing } = await supabase
+        .from('templates')
+        .select('id')
+        .eq('name', '__ai_memory__')
+        .maybeSingle()
+
+      if (existing) {
+        const { error } = await supabase
+          .from('templates')
+          .update({ body: memory })
+          .eq('id', existing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from('templates')
+          .insert({ name: '__ai_memory__', type: 'note', subject: null, body: memory })
+        if (error) throw error
+      }
+
+      toast.success('Contexto IA guardado!')
+    } catch (e) {
+      toast.error('Erro ao guardar contexto IA.')
+      console.error(e)
+    } finally {
+      setSavingMemory(false)
+    }
+  }
 
   async function handleRelinkPreview() {
     setRelinking(true)
@@ -178,6 +226,54 @@ export function SettingsClient({ initialSignature }: Props) {
             {relinking ? 'A verificar…' : 'Verificar e corrigir'}
           </Button>
         )}
+      </div>
+
+      {/* AI Memory card */}
+      <div
+        className="rounded-xl p-6 space-y-4"
+        style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+      >
+        <div className="flex items-start gap-2">
+          <Brain className="h-4 w-4 mt-0.5" style={{ color: 'var(--primary)' }} />
+          <div>
+            <h2 className="text-[15px] font-semibold" style={{ color: 'var(--foreground)' }}>
+              Contexto IA (Memory)
+            </h2>
+            <p className="text-[13px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+              Notas sobre integrações, troubleshoots, tom e clientes chave. Injetado no system prompt de todas as ações de IA (rascunho, sugestões, triagem). Usa markdown livre.
+            </p>
+          </div>
+        </div>
+
+        <textarea
+          rows={14}
+          value={memory}
+          onChange={(e) => setMemory(e.target.value)}
+          placeholder="## Integrações&#10;- ...&#10;&#10;## Troubleshoots&#10;- ..."
+          className="w-full rounded-lg p-3 font-mono text-[12px] leading-relaxed"
+          style={{
+            background: 'var(--muted)',
+            border: '1px solid var(--border)',
+            color: 'var(--foreground)',
+            resize: 'vertical',
+            outline: 'none',
+          }}
+        />
+
+        <div className="flex items-center justify-between">
+          <p className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
+            {memory.length} chars · ~{Math.ceil(memory.length / 4)} tokens
+          </p>
+          <Button
+            onClick={handleSaveMemory}
+            disabled={savingMemory}
+            className="gap-2 rounded-lg text-[13px] font-medium"
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+          >
+            <Save className="h-3.5 w-3.5" />
+            {savingMemory ? 'A guardar…' : 'Guardar contexto'}
+          </Button>
+        </div>
       </div>
 
       {/* Signature card */}

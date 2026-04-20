@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -23,10 +24,13 @@ export async function POST(req: NextRequest) {
     ? 'The email is in British English. Keep the same language and tone.'
     : 'O email está em Português europeu. Mantém o mesmo idioma e tom.'
 
+  const memory = await getAiMemory()
+
   try {
     const message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1000,
+      system: memory ? [{ type: 'text', text: memorySystemBlock(memory), cache_control: { type: 'ephemeral' } }] : undefined,
       messages: [{
         role: 'user',
         content: `You wrote the following email draft:

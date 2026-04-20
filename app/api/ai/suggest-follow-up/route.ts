@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -46,13 +47,15 @@ ${text}
 
 Qual o follow-up mais importante que Pedro deve criar?`
 
+  const memory = await getAiMemory()
+
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   let message
   try {
     message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 200,
-      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: `${SYSTEM_PROMPT}${memorySystemBlock(memory)}`, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: prompt }],
     })
   } catch (err) {

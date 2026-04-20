@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { createServiceClient } from '@/lib/supabase'
+import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -97,17 +97,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'Sem interações para analisar.' }, { status: 400 })
   }
 
-  // Fetch signature
-  const supabase = createServiceClient()
-  const { data: sigRow } = await supabase
-    .from('templates')
-    .select('body')
-    .eq('name', '__signature__')
-    .maybeSingle()
-  // Strip HTML from signature so Claude gets plain text instruction
-  const signatureRaw = sigRow?.body ?? null
-  const signature = signatureRaw ? stripHtml(signatureRaw) : null
-
   // Build thread oldest → newest, max 6 emails
   const emailThread = interactions
     .filter((i) => i.type === 'email')
@@ -134,6 +123,8 @@ ${text}`
   // Sign-off is appended by the send route as an HTML signature — do not include it in the body
   const signoffInstruction = `Do NOT include a sign-off or closing at the end of the body. End the email after the last sentence of content. The signature will be added automatically.`
 
+  const memory = await getAiMemory()
+
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
   let message
@@ -141,7 +132,7 @@ ${text}`
     message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
-      system: [{ type: 'text', text: `${basePrompt}\n\n${signoffInstruction}`, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: `${basePrompt}\n\n${signoffInstruction}${memorySystemBlock(memory)}`, cache_control: { type: 'ephemeral' } }],
       messages: [{
         role: 'user',
         content: `Write a reply to this email thread. The last message is from ${customer_name} and needs a response.\n\nThread:\n\n${emailThread}\n\nUse "Re: ${lastSubject}" as subject (or adjust slightly if needed).`,

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase'
+import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -96,6 +97,8 @@ ${ticketLines || '(nenhum)'}
 
 Gera o resumo executivo da semana.`
 
+  const memory = await getAiMemory()
+
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
   let message
@@ -103,7 +106,7 @@ Gera o resumo executivo da semana.`
     message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
-      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: `${SYSTEM_PROMPT}${memorySystemBlock(memory)}`, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: prompt }],
     })
   } catch (err) {
