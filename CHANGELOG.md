@@ -4,6 +4,22 @@
 
 ## [Unreleased] — Abril 2026
 
+### Fundir Clientes (Merge)
+- Botão "Fundir com..." (ícone de merge) no header da página de cada cliente
+- Pesquisa interativa de clientes duplicados
+- Diálogo de confirmação com aviso explícito de irreversibilidade
+- Migra em paralelo todas as interações, follow-ups, tickets e identificadores do cliente selecionado para o cliente atual
+- Identificadores duplicados são ignorados (não gera conflito de chave única)
+- O cliente duplicado é eliminado após a migração
+- Nova rota `POST /api/customers/[id]/merge` com `{ source_id }`
+
+### Agrupamento de Emails por Thread
+- Emails com o mesmo assunto (normalizado) são agrupados num cartão de thread na timeline
+- Strip automático de prefixos `Re:`, `Fwd:`, `RES:`, `ENC:` e variantes antes de comparar assuntos
+- Threads mostram todas as mensagens em ordem cronológica com indicador de direção (enviado/recebido)
+- Apenas emails com 2+ mensagens no mesmo assunto dentro de 30 dias são agrupados — emails únicos mantêm-se como itens individuais
+- Compatível com a timeline composta (emails de endereços alternativos também são agrupados)
+
 ### Eliminar Cliente
 - Botão de eliminar (ícone vermelho) no header da página do cliente
 - Diálogo de confirmação com aviso explícito de irreversibilidade

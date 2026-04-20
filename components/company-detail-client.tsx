@@ -16,10 +16,10 @@ import { EditCompanyDialog } from '@/components/edit-company-dialog'
 import { AddInteractionDialog } from '@/components/add-interaction-dialog'
 import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
 import { SendEmailDialog } from '@/components/send-email-dialog'
-import { cn, STATUS_STYLES, STATUS_LABELS, healthColor, URGENCY_STYLES, formatDateTime, formatDate } from '@/lib/utils'
+import { cn, STATUS_STYLES, STATUS_LABELS, healthColor, URGENCY_STYLES, formatDateTime, formatDate, dueDateLabel, PRIORITY_STYLES } from '@/lib/utils'
 import { CHANNEL_CONFIG } from '@/lib/channel-config'
 import { toast } from 'sonner'
-import type { Company, CustomerWithIdentifiers, Interaction } from '@/lib/database.types'
+import type { Company, CustomerWithIdentifiers, Interaction, FollowUp, Ticket } from '@/lib/database.types'
 
 function cleanContent(raw: string): string {
   return raw
@@ -47,8 +47,8 @@ interface Props {
   company: Company
   customers: CustomerWithIdentifiers[]
   interactions: Interaction[]
-  openFollowUps: number
-  openTickets: number
+  followUps: FollowUp[]
+  tickets: Ticket[]
 }
 
 // Pick-a-contact inline widget
@@ -82,8 +82,10 @@ function ContactPicker({
   )
 }
 
-export function CompanyDetailClient({ company, customers, interactions, openFollowUps, openTickets }: Props) {
+export function CompanyDetailClient({ company, customers, interactions, followUps, tickets }: Props) {
   const router = useRouter()
+  const openFollowUps = followUps.length
+  const openTickets = tickets.length
   const [showEdit,           setShowEdit]           = useState(false)
   const [addInteractionFor,  setAddInteractionFor]  = useState<string | null>(null)
   const [addFollowUpFor,     setAddFollowUpFor]     = useState<string | null>(null)
@@ -346,6 +348,12 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
           <TabsTrigger value="timeline" className="rounded-md text-[13px] px-4 py-1.5">
             Timeline ({interactions.length})
           </TabsTrigger>
+          <TabsTrigger value="followups" className="rounded-md text-[13px] px-4 py-1.5">
+            Follow-ups ({openFollowUps})
+          </TabsTrigger>
+          <TabsTrigger value="tickets" className="rounded-md text-[13px] px-4 py-1.5">
+            Tickets ({openTickets})
+          </TabsTrigger>
         </TabsList>
 
         {/* CONTACTS */}
@@ -434,6 +442,86 @@ export function CompanyDetailClient({ company, customers, interactions, openFoll
                   )}
                 </div>
               </div>
+            )
+          })}
+        </TabsContent>
+
+        {/* FOLLOW-UPS */}
+        <TabsContent value="followups" className="mt-5 space-y-2">
+          {followUps.length === 0 ? (
+            <div className="rounded-xl p-8 text-center" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
+              <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>Sem follow-ups abertos.</p>
+            </div>
+          ) : followUps.map((f) => {
+            const ps = PRIORITY_STYLES[f.priority]
+            const { label: dueLabel, color: dueColor } = dueDateLabel(f.due_date)
+            const customerName = customers.find((c) => c.id === f.customer_id)?.name
+            return (
+              <Link key={f.id} href={`/customers/${f.customer_id}`}
+                className="flex items-start gap-4 rounded-xl p-4 transition-opacity hover:opacity-80"
+                style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', display: 'flex' }}>
+                <div className="flex-1 min-w-0">
+                  {customerName && (
+                    <p className="text-[11px] font-medium mb-0.5" style={{ color: 'var(--primary)' }}>{customerName}</p>
+                  )}
+                  <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{f.title}</p>
+                  {f.description && (
+                    <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted-foreground)' }}>{f.description}</p>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-[11px] font-medium rounded-full px-2 py-0.5" style={{ background: ps.bg, color: ps.text }}>
+                    {f.priority}
+                  </span>
+                  <span className="text-[11px]" style={{ color: dueColor }}>{dueLabel}</span>
+                </div>
+              </Link>
+            )
+          })}
+        </TabsContent>
+
+        {/* TICKETS */}
+        <TabsContent value="tickets" className="mt-5 space-y-2">
+          {tickets.length === 0 ? (
+            <div className="rounded-xl p-8 text-center" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
+              <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>Sem tickets abertos.</p>
+            </div>
+          ) : tickets.map((t) => {
+            const ps = PRIORITY_STYLES[t.priority]
+            const customerName = customers.find((c) => c.id === t.customer_id)?.name
+            return (
+              <Link key={t.id} href={`/customers/${t.customer_id}`}
+                className="flex items-start gap-4 rounded-xl p-4 transition-opacity hover:opacity-80"
+                style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', display: 'flex' }}>
+                <div className="flex-1 min-w-0">
+                  {customerName && (
+                    <p className="text-[11px] font-medium mb-0.5" style={{ color: 'var(--primary)' }}>{customerName}</p>
+                  )}
+                  <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{t.title}</p>
+                  {t.description && (
+                    <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted-foreground)' }}>{t.description}</p>
+                  )}
+                  {t.tags.length > 0 && (
+                    <div className="flex gap-1 flex-wrap mt-1">
+                      {t.tags.map((tag) => (
+                        <span key={tag} className="rounded-md px-1.5 py-0.5 text-[11px]"
+                          style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-[11px] font-medium rounded-full px-2 py-0.5" style={{ background: ps.bg, color: ps.text }}>
+                    {t.priority}
+                  </span>
+                  <span className="text-[11px] rounded-full px-2 py-0.5"
+                    style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>
+                    {t.status}
+                  </span>
+                </div>
+              </Link>
             )
           })}
         </TabsContent>

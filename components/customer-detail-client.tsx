@@ -6,7 +6,7 @@ import {
   Mail, MessageSquare, Video,
   Plus, ExternalLink, Heart, Building2, Tag,
   CheckCircle2, Circle, Pencil, ArrowLeft, ClipboardPaste,
-  Sparkles, Loader2, ChevronDown, ChevronUp, RefreshCw, Trash2, Paperclip,
+  Sparkles, Loader2, ChevronDown, ChevronUp, RefreshCw, Trash2, Paperclip, GitMerge,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -21,6 +21,7 @@ import { AddInteractionDialog } from '@/components/add-interaction-dialog'
 import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
 import { TicketBuilderDialog } from '@/components/ticket-builder-dialog'
 import { EditCustomerDialog } from '@/components/edit-customer-dialog'
+import { MergeCustomerDialog } from '@/components/merge-customer-dialog'
 import { BubblesVideoModal } from '@/components/bubbles-video-modal'
 import { PasteConversationDialog } from '@/components/paste-conversation-dialog'
 import { SendEmailDialog } from '@/components/send-email-dialog'
@@ -56,33 +57,82 @@ function stripHtml(html: string): string {
 
 type ThreadItem =
   | { kind: 'single'; i: Interaction }
-  | { kind: 'thread'; messages: Interaction[] }
+  | { kind: 'thread'; messages: Interaction[] }              // WhatsApp
+  | { kind: 'email-thread'; subject: string; messages: Interaction[] }  // Email
 
-const THREAD_GAP_MS = 12 * 60 * 60 * 1000 // 12 h — split thread if gap > 12h
+const THREAD_GAP_MS = 12 * 60 * 60 * 1000                  // 12h — split WhatsApp thread
+const EMAIL_THREAD_WINDOW_MS = 30 * 24 * 60 * 60 * 1000    // 30 days — max email thread span
+
+function normalizeSubject(raw: string): string {
+  // Strip Re:/Fwd: prefixes (EN + PT + common variations), repeat until clean
+  let s = raw
+  let prev = ''
+  while (s !== prev) {
+    prev = s
+    s = s.replace(/^(re|fw|fwd|res|enc|reen|rv|tr|antwort|odpowiedź):\s*/gi, '').trim()
+  }
+  return s.toLowerCase().replace(/\s+/g, ' ').trim()
+}
 
 function groupTimeline(interactions: Interaction[]): ThreadItem[] {
-  const result: ThreadItem[] = []
+  // Phase 1: group emails by normalized subject (ignore no-subject emails)
+  const emailsBySubject = new Map<string, Interaction[]>()
+  for (const i of interactions) {
+    if (i.type !== 'email' || !i.subject) continue
+    const key = normalizeSubject(i.subject)
+    if (!emailsBySubject.has(key)) emailsBySubject.set(key, [])
+    emailsBySubject.get(key)!.push(i)
+  }
+
+  const threadedIds = new Set<string>()
+  const emailItems: Array<{ item: ThreadItem; timestamp: number }> = []
+
+  for (const [, msgs] of emailsBySubject) {
+    const sorted = [...msgs].sort((a, b) =>
+      new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime()
+    )
+    const oldest = new Date(sorted[0].occurred_at).getTime()
+    const newest = new Date(sorted[sorted.length - 1].occurred_at).getTime()
+    if (sorted.length >= 2 && newest - oldest <= EMAIL_THREAD_WINDOW_MS) {
+      for (const m of sorted) threadedIds.add(m.id)
+      emailItems.push({
+        item: { kind: 'email-thread', subject: sorted[0].subject!, messages: sorted },
+        timestamp: newest,
+      })
+    }
+  }
+
+  // Phase 2: handle remaining interactions (non-threaded emails + WhatsApp + others)
+  const remaining = interactions.filter((i) => !threadedIds.has(i.id))
+  const otherItems: Array<{ item: ThreadItem; timestamp: number }> = []
   let idx = 0
-  while (idx < interactions.length) {
-    const curr = interactions[idx]
+
+  while (idx < remaining.length) {
+    const curr = remaining[idx]
     if (curr.type !== 'whatsapp') {
-      result.push({ kind: 'single', i: curr })
+      otherItems.push({ item: { kind: 'single', i: curr }, timestamp: new Date(curr.occurred_at).getTime() })
       idx++
     } else {
       const thread: Interaction[] = [curr]
-      while (idx + 1 < interactions.length && interactions[idx + 1].type === 'whatsapp') {
-        // interactions are newest-first → next item is older; currTime - nextTime = gap
-        const currTime = new Date(interactions[idx].occurred_at).getTime()
-        const nextTime = new Date(interactions[idx + 1].occurred_at).getTime()
+      while (idx + 1 < remaining.length && remaining[idx + 1].type === 'whatsapp') {
+        const currTime = new Date(remaining[idx].occurred_at).getTime()
+        const nextTime = new Date(remaining[idx + 1].occurred_at).getTime()
         if (currTime - nextTime > THREAD_GAP_MS) break
         idx++
-        thread.push(interactions[idx])
+        thread.push(remaining[idx])
       }
-      result.push({ kind: 'thread', messages: [...thread].reverse() }) // oldest→newest
+      otherItems.push({
+        item: { kind: 'thread', messages: [...thread].reverse() },
+        timestamp: new Date(thread[0].occurred_at).getTime(),
+      })
       idx++
     }
   }
-  return result
+
+  // Phase 3: merge + sort newest-first
+  return [...emailItems, ...otherItems]
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .map((x) => x.item)
 }
 
 
@@ -147,6 +197,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
 
   const [showDeleteCustomer, setShowDeleteCustomer] = useState(false)
   const [deletingCustomer,   setDeletingCustomer]   = useState(false)
+  const [showMerge,          setShowMerge]          = useState(false)
 
   async function deleteCustomer() {
     setDeletingCustomer(true)
@@ -333,6 +384,14 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
               {syncingEmails
                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 : <RefreshCw className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              onClick={() => setShowMerge(true)}
+              title="Fundir com outro cliente"
+              className="h-8 w-8 flex items-center justify-center rounded-lg transition-opacity hover:opacity-70"
+              style={{ background: 'var(--muted)', color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}
+            >
+              <GitMerge className="h-3.5 w-3.5" />
             </button>
             <Button
               size="sm"
@@ -731,6 +790,84 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
               )
             }
 
+            // Email thread
+            if (item.kind === 'email-thread') {
+              const { subject, messages } = item
+              const ch = CHANNEL_CONFIG['email'] ?? CHANNEL_CONFIG.note
+              const Icon = ch.icon
+              const newestMsg = messages[messages.length - 1]
+              const oldestMsg = messages[0]
+              const dateRange = (() => {
+                const oldest = new Date(oldestMsg.occurred_at).toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' })
+                const newest = new Date(newestMsg.occurred_at).toLocaleDateString('pt-PT', { day: 'numeric', month: 'short', year: 'numeric' })
+                return oldest === newest ? newest : `${oldest} – ${newest}`
+              })()
+              return (
+                <div key={`email-thread-${itemIdx}`} className="flex gap-3.5 animate-fade-in">
+                  <div className="flex flex-col items-center">
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: ch.bg }}>
+                      <Icon className="h-4 w-4" style={{ color: ch.color }} />
+                    </div>
+                  </div>
+                  <div className="flex-1 rounded-xl overflow-hidden" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
+                    <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: '1px solid var(--border)' }}>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-[11px] font-semibold uppercase tracking-wide shrink-0" style={{ color: ch.color }}>
+                          Email · {messages.length} mensagens
+                        </span>
+                        <span className="text-[12px] font-medium truncate" style={{ color: 'var(--foreground)' }}>
+                          {subject}
+                        </span>
+                      </div>
+                      <span className="text-[11px] shrink-0 ml-2" style={{ color: 'var(--muted-foreground)' }}>
+                        {dateRange}
+                      </span>
+                    </div>
+                    <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                      {messages.map((m) => {
+                        const isOut = m.direction === 'outbound'
+                        const cleaned = m.content ? stripHtml(m.content) : ''
+                        const truncated = cleaned.length > 200 ? cleaned.slice(0, 200) + '…' : cleaned
+                        return (
+                          <div key={m.id} className="group px-4 py-3 space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className="text-[10px] rounded-full px-1.5 py-0.5"
+                                  style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                                >
+                                  {isOut ? '↑ enviado' : '↓ recebido'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
+                                  {formatDateTime(m.occurred_at)}
+                                </span>
+                                <button
+                                  onClick={() => deleteInteraction(m.id)}
+                                  disabled={deletingId === m.id}
+                                  className="transition-opacity hover:opacity-100 p-0.5 rounded"
+                                  style={{ color: 'var(--muted-foreground)', opacity: 0.3 }}
+                                  title="Apagar"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </div>
+                            </div>
+                            {truncated && (
+                              <p className="text-sm leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+                                {truncated}
+                              </p>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )
+            }
+
             // WhatsApp thread
             const { messages } = item
             const newestMsg = messages[messages.length - 1]
@@ -928,6 +1065,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
         customerEmail={customer.customer_identifiers.find((i) => i.type === 'email')?.value ?? null}
         onClose={() => { setShowOnboarding(false); refresh() }}
       />
+      <MergeCustomerDialog open={showMerge} customer={customer} onClose={() => setShowMerge(false)} />
     </div>
   )
 }
