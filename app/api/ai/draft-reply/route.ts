@@ -107,7 +107,7 @@ export async function POST(req: Request) {
         ? `${customer_name}${customer_company ? ` (${customer_company})` : ''}`
         : 'Pedro (eu)'
       const text = withAttachments(
-        i.content ? stripHtml(i.content).slice(0, 600) : '(sem conteúdo)',
+        i.content ? stripHtml(i.content).slice(0, 4000) : '(sem conteúdo)',
         i.metadata
       )
       return `[${new Date(i.occurred_at).toLocaleDateString('pt-PT')} — ${who}]
