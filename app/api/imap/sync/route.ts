@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { ImapFlow } from 'imapflow'
 import { createServiceClient } from '@/lib/supabase'
 import { analyzeAttachment } from '@/lib/analyze-attachment'
@@ -78,7 +78,23 @@ function extractForwardedSender(body: string): { email: string; name: string } |
   return null
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Auth: Vercel cron header, session cookie (browser button), or CRON_SECRET bearer (external cron)
+  const isVercelCron   = req.headers.get('x-vercel-cron') === '1'
+  const sessionCookie  = req.cookies.get('kapta_session')?.value
+  const validSession   = process.env.AUTH_SESSION_TOKEN
+  const cronSecret     = process.env.CRON_SECRET
+  const authHeader     = req.headers.get('authorization')
+
+  const allowed =
+    isVercelCron ||
+    (validSession && sessionCookie === validSession) ||
+    (cronSecret   && authHeader   === `Bearer ${cronSecret}`)
+
+  if (!allowed) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const supabase = createServiceClient()
 
   const imapUser  = process.env.IMAP_USER?.toLowerCase() ?? ''
@@ -100,13 +116,28 @@ export async function GET() {
     emailToCustomerId.set(id.value.toLowerCase().trim(), id.customer_id)
   }
 
-  // ── Pre-load ALL existing source_ids — eliminates N+1 dedup queries ──
-  // .range() is required: Supabase JS v2 caps .select() at 1000 rows by default
+  // ── Determine sync window: since latest known email minus 1 day (safety buffer) ──
+  // First sync → last 90 days. Subsequent syncs → only recent emails. Much faster.
+  const { data: latestEmail } = await supabase
+    .from('interactions')
+    .select('occurred_at')
+    .eq('type', 'email')
+    .order('occurred_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  const syncSince = latestEmail?.occurred_at
+    ? new Date(new Date(latestEmail.occurred_at).getTime() - 24 * 60 * 60 * 1000)
+    : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+
+  // ── Pre-load source_ids only within the sync window (+ 2-day buffer) ──
+  // No need to load all 1000+ historical IDs — dedup only needed for recent window
+  const dedupSince = new Date(syncSince.getTime() - 2 * 24 * 60 * 60 * 1000)
   const { data: existingRows } = await supabase
     .from('interactions')
     .select('source_id')
     .not('source_id', 'is', null)
-    .range(0, 99999)
+    .gte('occurred_at', dedupSince.toISOString())
 
   const existingSourceIds = new Set<string>()
   for (const row of existingRows ?? []) {
@@ -183,9 +214,7 @@ export async function GET() {
       }
 
       try {
-        // Only fetch emails from the last 90 days — avoids re-processing old messages
-        const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-        const searchResult = await client.search({ since }, { uid: true })
+        const searchResult = await client.search({ since: syncSince }, { uid: true })
         const uids = searchResult === false ? [] : searchResult
 
         const toProcess = [...uids].reverse().slice(0, 2000)
@@ -216,19 +245,23 @@ export async function GET() {
           existingSourceIds.add(messageId) // prevent dupes within this run
 
           // ── Resolve direction + customer ──
-          // If inbox email is FROM a team member (@kapta.pt), treat as outbound
-          // and look at TO for the customer — e.g. Bruno forwarding or CC'ing Pedro
+          // If inbox email is FROM a team member (@kapta.pt), keep direction=inbound
+          // (Pedro received it) but look at TO for the customer —
+          // e.g. site@kapta.pt notifying Pedro about a new lead, Bruno forwarding, etc.
           const fromAddrs = msg.envelope?.from ?? []
           const allFromAreTeam = fromAddrs.length > 0 &&
             fromAddrs.every(a => !a.address || isInternal(a.address.toLowerCase().trim()))
 
-          const effectiveDirection: 'inbound' | 'outbound' =
-            direction === 'inbound' && allFromAreTeam ? 'outbound' : direction
+          // Stored direction: always honour the mailbox (INBOX=inbound, Sent=outbound)
+          const effectiveDirection: 'inbound' | 'outbound' = direction
 
+          // Customer address lookup: when FROM is all-team, the external party is in TO
           const addresses =
-            effectiveDirection === 'inbound'
-              ? [...(msg.envelope?.from ?? []), ...(msg.envelope?.cc ?? [])]
-              : [...(msg.envelope?.to ?? []), ...(msg.envelope?.cc ?? [])]
+            (direction === 'inbound' && allFromAreTeam)
+              ? [...(msg.envelope?.to ?? []), ...(msg.envelope?.cc ?? [])]
+              : direction === 'inbound'
+                ? [...(msg.envelope?.from ?? []), ...(msg.envelope?.cc ?? [])]
+                : [...(msg.envelope?.to ?? []), ...(msg.envelope?.cc ?? [])]
 
           let customerId: string | null = null
           let matchedEmail = ''
@@ -319,9 +352,8 @@ export async function GET() {
               }
             }
 
-            // Outbound to unknown address → skip. Pedro knows who he emailed.
-            // If they're not in the CRM, he'll add them manually.
-            // Auto-creating here is the root cause of duplicate customer records.
+            // Sent-folder outbound to unknown address → skip.
+            // Pedro knows who he emailed; if not in CRM, he'll add manually.
           }
 
           if (!customerId) { unknown++; continue }
