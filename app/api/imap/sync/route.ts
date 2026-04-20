@@ -265,6 +265,20 @@ export async function GET(req: NextRequest) {
             }
           }
 
+          const bodyText = (parsed.text ?? '').trim().slice(0, 4000)
+
+          // Team-forward inbound: FROM=@kapta.pt, TO=@kapta.pt — no external address in envelope.
+          // Parse forwarded body to recover the original sender (e.g. Bruno fwd Petstourism to Pedro).
+          if (!primarySenderEmail && effectiveDirection === 'inbound' && allFromAreTeam && bodyText) {
+            const fwd = extractForwardedSender(bodyText)
+            if (fwd && !isInternal(fwd.email)) {
+              primarySenderEmail = fwd.email
+              primarySenderName  = fwd.name || fwd.email.split('@')[0]
+              const found = emailToCustomerId.get(fwd.email)
+              if (found) { customerId = found; matchedEmail = fwd.email }
+            }
+          }
+
           if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail && isAutomatedSender(primarySenderEmail)) {
             unknown++; continue
           }
@@ -291,8 +305,6 @@ export async function GET(req: NextRequest) {
               created++
             }
           }
-
-          const bodyText = (parsed.text ?? '').trim().slice(0, 4000)
 
           if (!customerId && effectiveDirection === 'outbound') {
             for (const addr of replyTo) {

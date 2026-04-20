@@ -4,6 +4,16 @@
 
 ## [Unreleased] — Abril 2026
 
+### Fix — Sync de Team-Forwards (Bruno / site@ para Pedro)
+- Sync IMAP não capturava emails onde FROM=@kapta.pt e TO=@kapta.pt — ambas as pontas internas → envelope sem endereço externo → interação perdida
+- Body-parse do `From:` reencaminhado era corrido apenas para outbound; agora também em inbound quando `allFromAreTeam` e sem `primarySenderEmail`
+- Bruno reencaminhar email de petstourism.com para Pedro → CRM deteta "info@petstourism.com" no body → auto-cria lead + guarda como inbound
+
+### Backfill — Correção de Encoding em Emails Antigos
+- Novo endpoint `POST /api/imap/backfill-content` (preview/confirm) re-descodifica interações com conteúdo legado: boundaries MIME `--_000_…` + quoted-printable `=C3=A7`
+- Helper puro `lib/decode-legacy-email.ts` (TextDecoder — funciona browser + Node): extrai secção `text/plain` e resolve sequências hex UTF-8
+- Botão **"Verificar e corrigir"** em Definições com fluxo preview → confirmação; idempotente (emails já limpos são saltados pelo `looksLikeLegacyEmail`)
+
 ### Fix Raiz — Parse MIME Correto (Outlook, Quoted-Printable, Charsets)
 - Sync IMAP usava `bodyParts: ['1']` que para emails multipart (Outlook) retorna o container MIME com boundaries e headers — causava conteúdo tipo `--_000_GVTP...Content-Type: text/plain` a aparecer na timeline
 - Quoted-printable também não era descodificado — `=C3=A7` em vez de `ç`, `=C3=A3o` em vez de `ão`
