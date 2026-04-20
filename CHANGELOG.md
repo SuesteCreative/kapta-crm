@@ -4,6 +4,25 @@
 
 ## [Unreleased] — Abril 2026
 
+### Fix Raiz — Parse MIME Correto (Outlook, Quoted-Printable, Charsets)
+- Sync IMAP usava `bodyParts: ['1']` que para emails multipart (Outlook) retorna o container MIME com boundaries e headers — causava conteúdo tipo `--_000_GVTP...Content-Type: text/plain` a aparecer na timeline
+- Quoted-printable também não era descodificado — `=C3=A7` em vez de `ç`, `=C3=A3o` em vez de `ão`
+- Adicionada dependência `mailparser` (standard Node MIME parser)
+- Refactor de 2-pass: pass 1 só envelopes (dedup barato), pass 2 pull source + `simpleParser` só para novos — reduz bandwidth em syncs incrementais
+- `simpleParser` devolve `text`/`html`/`from`/`to`/`attachments` já descodificados (charset + quoted-printable + base64 + nested multipart tudo tratado)
+- Attachments: agora extraídos diretamente do `parsed.attachments` (Buffer decoded) em vez de walk manual do bodyStructure + fetchOne por part
+- Fallback "Itens Enviados" adicionado ao regex de deteção da pasta Sent (Outlook localizado pt-PT)
+- Aplicado em `sync/route.ts` e `sync-customer/route.ts`
+- **Nota**: emails já sincronizados com conteúdo partido não são re-processados (dedup por `source_id`). Para limpar histórico, apagar as interações afetadas e re-sync ou pedir backfill route dedicada
+
+### Contexto IA (Memory Global)
+- Novo editor **"Contexto IA (Memory)"** em `/settings`: textarea markdown livre para notas sobre integrações, troubleshoots recorrentes, tom de resposta e clientes chave
+- Guardado em `templates` (`name='__ai_memory__'`, `type='note'`)
+- Injetado como bloco `CONTEXTO DO NEGÓCIO` no system prompt de **todas** as rotas IA relevantes: `draft-reply`, `refine-draft`, `suggest-ticket`, `suggest-follow-up`, `draft-resolution`, `triage-inbox`, `detect-commitments`, `cluster-issues`, `suggest-follow-ups-global`, `suggest-tickets-global`, `customer-summary`, `company-summary`, `weekly-digest`
+- Helper partilhado `lib/ai-memory.ts` (`getAiMemory` + `memorySystemBlock`) — single source of truth
+- Injetado com `cache_control: ephemeral` → custo residual com Claude prompt cache (~$0.005/dia para ~500 tokens × 100 calls)
+- Contador de tokens estimado no editor (`length / 4`)
+
 ### Fundir Clientes (Merge)
 - Botão "Fundir com..." (ícone de merge) no header da página de cada cliente
 - Pesquisa interativa de clientes duplicados

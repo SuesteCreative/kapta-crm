@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ImapFlow } from 'imapflow'
+import { simpleParser, ParsedMail } from 'mailparser'
 import { createServiceClient } from '@/lib/supabase'
 import { analyzeAttachment } from '@/lib/analyze-attachment'
 import { randomUUID } from 'crypto'
@@ -7,45 +8,11 @@ import { randomUUID } from 'crypto'
 export const dynamic = 'force-dynamic'
 
 const ATTACH_BUCKET = 'email-attachments'
-const ATTACH_MAX_BYTES   = 15 * 1024 * 1024 // skip download > 15 MB
-const ATTACH_MAX_ANALYZE =  5 * 1024 * 1024 // skip AI analysis > 5 MB
+const ATTACH_MAX_BYTES   = 15 * 1024 * 1024
+const ATTACH_MAX_ANALYZE =  5 * 1024 * 1024
 
 type AttachmentMeta = { name: string; mime: string; size: number; url: string | null; ai_summary: string }
 
-/** Walk IMAP bodyStructure tree and return parts with disposition=attachment */
-function findAttachmentParts(
-  node: Record<string, unknown> | null | undefined,
-  path = '',
-): Array<{ part: string; name: string; mime: string; size: number }> {
-  if (!node) return []
-  const type = ((node.type as string) ?? '').toLowerCase()
-  if (type === 'multipart') {
-    const children = (node.childNodes as Record<string, unknown>[]) ?? []
-    return children.flatMap((child, i) =>
-      findAttachmentParts(child, path ? `${path}.${i + 1}` : `${i + 1}`)
-    )
-  }
-  const disposition = (((node.disposition as Record<string, unknown>)?.value as string) ?? '').toLowerCase()
-  if (disposition !== 'attachment') return []
-  const dispParams  = ((node.disposition as Record<string, unknown>)?.params ?? {}) as Record<string, string>
-  const nodeParams  = ((node.parameters as Record<string, string>) ?? {})
-  const name = dispParams.filename || nodeParams.name || `file-${path || '1'}`
-  const mime = `${type}/${((node.subtype as string) ?? 'octet-stream').toLowerCase()}`
-  const size = (node.size as number) ?? 0
-  return [{ part: path || '1', name, mime, size }]
-}
-
-/**
- * IMAP Sync — Safe by design:
- * - Reads email metadata + plain-text only (no HTML, no images, no attachments)
- * - Never marks emails as read, never clicks links, never loads remote content
- * - Matches known customers OR auto-creates leads for new inbound senders
- * - Deduplicates by Message-ID — pre-loaded into a Set (no N+1 queries)
- * - Batch-inserts new interactions (no N+1 on inserts)
- * - Skips Spam/Junk/Trash automatically
- * - Treats the entire sending domain (e.g. @kapta.pt) as internal
- */
-// Automated sender prefixes — never create a lead for these
 const AUTOMATED_PREFIXES = [
   'noreply', 'no-reply', 'donotreply', 'do-not-reply',
   'notifications', 'notification', 'mailer-daemon', 'postmaster',
@@ -55,14 +22,11 @@ const AUTOMATED_PREFIXES = [
 ]
 
 function isAutomatedSender(email: string): boolean {
-  const local = email.split('@')[0].toLowerCase().replace(/\+.*$/, '') // strip +tag
+  const local = email.split('@')[0].toLowerCase().replace(/\+.*$/, '')
   return AUTOMATED_PREFIXES.some((p) => local === p || local.startsWith(p + '-') || local.startsWith(p + '_'))
 }
 
-/** Extract original sender email from a forwarded email body.
- *  Handles Gmail, Outlook, Apple Mail (incl. "> From:" quoted lines). */
 function extractForwardedSender(body: string): { email: string; name: string } | null {
-  // Match "From:" at line start, optionally preceded by ">" quote chars and spaces
   const patterns = [
     /^[>\s]*From:\s+(?:"?([^"<\r\n]+?)"?\s+)?<([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})>/im,
     /^[>\s]*From:\s+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/im,
@@ -78,8 +42,22 @@ function extractForwardedSender(body: string): { email: string; name: string } |
   return null
 }
 
+type AddressInfo = { address?: string; name?: string }
+
+function flattenAddresses(raw: ParsedMail['from'] | ParsedMail['to'] | ParsedMail['cc']): AddressInfo[] {
+  if (!raw) return []
+  const list = Array.isArray(raw) ? raw : [raw]
+  const out: AddressInfo[] = []
+  for (const entry of list) {
+    if (!entry?.value) continue
+    for (const a of entry.value) {
+      if (a.address) out.push({ address: a.address, name: a.name })
+    }
+  }
+  return out
+}
+
 export async function GET(req: NextRequest) {
-  // Auth: Vercel cron header, session cookie (browser button), or CRON_SECRET bearer (external cron)
   const isVercelCron   = req.headers.get('x-vercel-cron') === '1'
   const sessionCookie  = req.cookies.get('kapta_session')?.value
   const validSession   = process.env.AUTH_SESSION_TOKEN
@@ -105,7 +83,6 @@ export async function GET(req: NextRequest) {
     return e === imapUser || (ownDomain.length > 0 && e.endsWith('@' + ownDomain))
   }
 
-  // ── Pre-load ALL email identifiers once ──
   const { data: allIdentifiers } = await supabase
     .from('customer_identifiers')
     .select('value, customer_id')
@@ -116,8 +93,6 @@ export async function GET(req: NextRequest) {
     emailToCustomerId.set(id.value.toLowerCase().trim(), id.customer_id)
   }
 
-  // ── Determine sync window: since latest known email minus 1 day (safety buffer) ──
-  // First sync → last 90 days. Subsequent syncs → only recent emails. Much faster.
   const { data: latestEmail } = await supabase
     .from('interactions')
     .select('occurred_at')
@@ -130,8 +105,6 @@ export async function GET(req: NextRequest) {
     ? new Date(new Date(latestEmail.occurred_at).getTime() - 24 * 60 * 60 * 1000)
     : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
 
-  // ── Pre-load source_ids only within the sync window (+ 2-day buffer) ──
-  // No need to load all 1000+ historical IDs — dedup only needed for recent window
   const dedupSince = new Date(syncSince.getTime() - 2 * 24 * 60 * 60 * 1000)
   const { data: existingRows } = await supabase
     .from('interactions')
@@ -161,7 +134,6 @@ export async function GET(req: NextRequest) {
   let unknown = 0
   let created = 0
 
-  // Batch buffer — flushed every 50 rows
   type NewInteraction = {
     customer_id: string
     type: 'email'
@@ -177,8 +149,6 @@ export async function GET(req: NextRequest) {
   async function flushBuffer() {
     if (buffer.length === 0) return
     const chunk = buffer.splice(0, buffer.length)
-    // upsert with ignoreDuplicates = ON CONFLICT (source_id) DO NOTHING
-    // requires unique constraint on source_id — safe to call even before constraint exists
     const { error } = await supabase
       .from('interactions')
       .upsert(chunk, { onConflict: 'source_id', ignoreDuplicates: true })
@@ -188,14 +158,12 @@ export async function GET(req: NextRequest) {
   try {
     await client.connect()
 
-    // Discover Sent folder using SPECIAL-USE flag (most reliable across servers)
-    // Fallback: try common folder names
     let sentPath = 'Sent'
     try {
       const allBoxes = await client.list()
       const sentBox = allBoxes.find((b) =>
         (b as unknown as Record<string, unknown>).specialUse === '\\Sent' ||
-        /^(sent|sent messages|sent items|\[gmail\]\/sent mail|gesendet|éléments envoyés)$/i.test(b.name)
+        /^(sent|sent messages|sent items|itens enviados|\[gmail\]\/sent mail|gesendet|éléments envoyés)$/i.test(b.name)
       )
       if (sentBox) sentPath = sentBox.path
     } catch { /* list failed — keep default */ }
@@ -215,53 +183,64 @@ export async function GET(req: NextRequest) {
 
       try {
         const searchResult = await client.search({ since: syncSince }, { uid: true })
-        const uids = searchResult === false ? [] : searchResult
+        const allUids = searchResult === false ? [] : searchResult
+        if (allUids.length === 0) continue
 
-        const toProcess = [...uids].reverse().slice(0, 2000)
-        if (toProcess.length === 0) continue
+        // Pass 1: envelope-only fetch to dedup without pulling bodies
+        const candidateUids: number[] = []
+        const uidToMessageId = new Map<number, string>()
+        for await (const msg of client.fetch([...allUids].reverse().slice(0, 2000), {
+          uid: true, envelope: true,
+        }, { uid: true })) {
+          const messageId = msg.envelope?.messageId
+          if (!messageId) continue
+          if (existingSourceIds.has(messageId)) { skipped++; continue }
+          existingSourceIds.add(messageId)
+          uidToMessageId.set(msg.uid, messageId)
+          candidateUids.push(msg.uid)
+        }
 
-        // Attachment work collected during fetch — processed after flushBuffer()
+        if (candidateUids.length === 0) continue
+
+        // Attachment work collected during parse
         type AttachWork = {
-          uid: number
           sourceId: string
           matchedEmail: string
-          parts: Array<{ part: string; name: string; mime: string; size: number }>
+          atts: Array<{ name: string; mime: string; size: number; content: Buffer }>
         }
         const attachWork: AttachWork[] = []
 
-        for await (const msg of client.fetch(toProcess, {
-          uid: true,
-          envelope: true,
-          internalDate: true,
-          bodyStructure: true,
-          bodyParts: ['1'],
+        // Pass 2: fetch full source for new messages only, parse with mailparser
+        for await (const msg of client.fetch(candidateUids, {
+          uid: true, source: true, internalDate: true,
         }, { uid: true })) {
+          const messageId = uidToMessageId.get(msg.uid)
+          if (!messageId || !msg.source) continue
 
-          const messageId = msg.envelope?.messageId
-          if (!messageId) continue
+          let parsed: ParsedMail
+          try {
+            parsed = await simpleParser(msg.source as Buffer)
+          } catch (err) {
+            console.error('Parse error for uid', msg.uid, err)
+            continue
+          }
 
-          // ── Deduplication — O(1) Set lookup, no DB query ──
-          if (existingSourceIds.has(messageId)) { skipped++; continue }
-          existingSourceIds.add(messageId) // prevent dupes within this run
+          const fromList = flattenAddresses(parsed.from)
+          const toList   = flattenAddresses(parsed.to)
+          const ccList   = flattenAddresses(parsed.cc)
+          const replyTo  = flattenAddresses(parsed.replyTo)
 
-          // ── Resolve direction + customer ──
-          // If inbox email is FROM a team member (@kapta.pt), keep direction=inbound
-          // (Pedro received it) but look at TO for the customer —
-          // e.g. site@kapta.pt notifying Pedro about a new lead, Bruno forwarding, etc.
-          const fromAddrs = msg.envelope?.from ?? []
-          const allFromAreTeam = fromAddrs.length > 0 &&
-            fromAddrs.every(a => !a.address || isInternal(a.address.toLowerCase().trim()))
+          const allFromAreTeam = fromList.length > 0 &&
+            fromList.every((a) => !a.address || isInternal(a.address.toLowerCase().trim()))
 
-          // Stored direction: always honour the mailbox (INBOX=inbound, Sent=outbound)
           const effectiveDirection: 'inbound' | 'outbound' = direction
 
-          // Customer address lookup: when FROM is all-team, the external party is in TO
           const addresses =
             (direction === 'inbound' && allFromAreTeam)
-              ? [...(msg.envelope?.to ?? []), ...(msg.envelope?.cc ?? [])]
+              ? [...toList, ...ccList]
               : direction === 'inbound'
-                ? [...(msg.envelope?.from ?? []), ...(msg.envelope?.cc ?? [])]
-                : [...(msg.envelope?.to ?? []), ...(msg.envelope?.cc ?? [])]
+                ? [...fromList, ...ccList]
+                : [...toList, ...ccList]
 
           let customerId: string | null = null
           let matchedEmail = ''
@@ -286,8 +265,6 @@ export async function GET(req: NextRequest) {
             }
           }
 
-          // ── Auto-create lead for unknown inbound senders ──
-          // Skip automated senders (noreply, mailer-daemon, newsletters, etc.)
           if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail && isAutomatedSender(primarySenderEmail)) {
             unknown++; continue
           }
@@ -315,18 +292,9 @@ export async function GET(req: NextRequest) {
             }
           }
 
-          // Read body early — needed for forward parsing fallback
-          let bodyText = ''
-          if (msg.bodyParts) {
-            const part = msg.bodyParts.get('1')
-            if (part) bodyText = part.toString('utf8').trim().slice(0, 4000)
-          }
+          const bodyText = (parsed.text ?? '').trim().slice(0, 4000)
 
-          // ── Fallback for team forwards (FROM=@kapta.pt, TO=@kapta.pt) ──
-          // Try Reply-To first, then parse forwarded body (Gmail/Outlook/Apple Mail)
           if (!customerId && effectiveDirection === 'outbound') {
-            // 1. Reply-To header
-            const replyTo = msg.envelope?.replyTo ?? []
             for (const addr of replyTo) {
               if (!addr.address) continue
               const email = addr.address.toLowerCase().trim()
@@ -339,7 +307,6 @@ export async function GET(req: NextRequest) {
               if (found) { customerId = found; matchedEmail = email; break }
             }
 
-            // 2. Parse forwarded body: "From: Name <email>" pattern
             if (!customerId && bodyText) {
               const fwd = extractForwardedSender(bodyText)
               if (fwd && !isInternal(fwd.email)) {
@@ -351,15 +318,12 @@ export async function GET(req: NextRequest) {
                 if (found) { customerId = found; matchedEmail = fwd.email }
               }
             }
-
-            // Sent-folder outbound to unknown address → skip.
-            // Pedro knows who he emailed; if not in CRM, he'll add manually.
           }
 
           if (!customerId) { unknown++; continue }
 
-          const subject = msg.envelope?.subject ?? null
-          const rawDate = msg.internalDate ?? msg.envelope?.date ?? new Date()
+          const subject = parsed.subject ?? null
+          const rawDate = msg.internalDate ?? parsed.date ?? new Date()
           const date    = rawDate instanceof Date ? rawDate : new Date(rawDate)
 
           buffer.push({
@@ -373,26 +337,35 @@ export async function GET(req: NextRequest) {
             occurred_at: date.toISOString(),
           })
 
-          // Queue attachment work (processed after flush — cannot fetchOne mid-fetch)
-          const attParts = findAttachmentParts(msg.bodyStructure as unknown as Record<string, unknown> | null)
-          if (attParts.length > 0) {
-            attachWork.push({ uid: msg.uid, sourceId: messageId, matchedEmail, parts: attParts })
+          // Collect attachments (already decoded by mailparser)
+          const attList = parsed.attachments ?? []
+          if (attList.length > 0) {
+            attachWork.push({
+              sourceId: messageId,
+              matchedEmail,
+              atts: attList
+                .filter((a) => a.content && (a.filename || a.cid))
+                .map((a) => ({
+                  name: a.filename || `file-${a.cid ?? 'attachment'}`,
+                  mime: a.contentType ?? 'application/octet-stream',
+                  size: a.size ?? (a.content as Buffer).length,
+                  content: a.content as Buffer,
+                })),
+            })
           }
 
-          // Flush every 50
           if (buffer.length >= 50) await flushBuffer()
         }
 
         await flushBuffer()
 
-        // ── Attachment download + analysis (runs after all interactions are inserted) ──
         if (attachWork.length > 0) {
           await supabase.storage.createBucket(ATTACH_BUCKET, { public: true }).catch(() => null)
 
           for (const work of attachWork) {
             const attachments: AttachmentMeta[] = []
 
-            for (const att of work.parts) {
+            for (const att of work.atts) {
               if (att.size > ATTACH_MAX_BYTES) {
                 attachments.push({
                   name: att.name, mime: att.mime, size: att.size, url: null,
@@ -401,29 +374,23 @@ export async function GET(req: NextRequest) {
                 continue
               }
               try {
-                const attMsg = await client.fetchOne(work.uid.toString(), { bodyParts: [att.part] }, { uid: true })
-                if (!attMsg) continue
-                const attBuf = (attMsg as Exclude<typeof attMsg, false>).bodyParts?.get(att.part)
-                if (!attBuf) continue
-
-                const nodeBuffer = Buffer.from(attBuf)
                 const ext = att.name.includes('.') ? att.name.split('.').pop() : 'bin'
                 const fileName = `${work.sourceId.replace(/[^a-z0-9]/gi, '_').slice(0, 40)}/${randomUUID()}.${ext}`
 
                 const { error: upErr } = await supabase.storage
                   .from(ATTACH_BUCKET)
-                  .upload(fileName, nodeBuffer, { contentType: att.mime, upsert: false })
+                  .upload(fileName, att.content, { contentType: att.mime, upsert: false })
                 if (upErr) continue
 
                 const { data: { publicUrl } } = supabase.storage.from(ATTACH_BUCKET).getPublicUrl(fileName)
 
                 const ai_summary = att.size <= ATTACH_MAX_ANALYZE
-                  ? await analyzeAttachment(nodeBuffer, { mime: att.mime, name: att.name, size: att.size })
+                  ? await analyzeAttachment(att.content, { mime: att.mime, name: att.name, size: att.size })
                   : att.name
 
                 attachments.push({ name: att.name, mime: att.mime, size: att.size, url: publicUrl, ai_summary })
               } catch (err) {
-                console.error('Attachment fetch/upload error:', att.name, err)
+                console.error('Attachment upload error:', att.name, err)
               }
             }
 
