@@ -26,10 +26,10 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
       ? supabase.from('interactions').select('*').in('customer_id', customerIds).order('occurred_at', { ascending: false })
       : Promise.resolve({ data: [] }),
     customerIds.length
-      ? supabase.from('follow_ups').select('id').in('customer_id', customerIds).eq('status', 'open')
+      ? supabase.from('follow_ups').select('*').in('customer_id', customerIds).eq('status', 'open').order('due_date', { ascending: true })
       : Promise.resolve({ data: [] }),
     customerIds.length
-      ? supabase.from('tickets').select('id').in('customer_id', customerIds).in('status', ['open', 'in-progress'])
+      ? supabase.from('tickets').select('*').in('customer_id', customerIds).in('status', ['open', 'in-progress']).order('created_at', { ascending: false })
       : Promise.resolve({ data: [] }),
   ])
 
@@ -38,8 +38,8 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
       company={company}
       customers={customers ?? []}
       interactions={interactions ?? []}
-      openFollowUps={followUps?.length ?? 0}
-      openTickets={tickets?.length ?? 0}
+      followUps={followUps ?? []}
+      tickets={tickets ?? []}
     />
   )
 }
