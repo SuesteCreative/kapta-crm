@@ -4,7 +4,7 @@ export type Direction = 'inbound' | 'outbound'
 export type Priority = 'low' | 'medium' | 'high' | 'urgent'
 export type FollowUpStatus = 'open' | 'done' | 'snoozed'
 export type TicketStatus = 'open' | 'in-progress' | 'resolved' | 'closed'
-export type IdentifierType = 'email' | 'phone' | 'whatsapp'
+export type IdentifierType = 'email' | 'phone' | 'whatsapp' | 'slack_channel'
 
 export interface Company {
   id: string

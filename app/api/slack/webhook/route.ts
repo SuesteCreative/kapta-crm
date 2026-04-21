@@ -162,10 +162,26 @@ export async function POST(req: NextRequest) {
     .limit(1)
     .maybeSingle()
 
-  let customerId = idRow?.customer_id ?? null
+  let customerId: string | null = idRow?.customer_id ?? null
+  let matchSource: 'user_email' | 'channel_map' | 'auto_created' = 'user_email'
+
+  if (!customerId) {
+    const { data: channelRow } = await supabase
+      .from('customer_identifiers')
+      .select('customer_id')
+      .eq('type', 'slack_channel')
+      .eq('value', event.channel)
+      .limit(1)
+      .maybeSingle()
+
+    if (channelRow?.customer_id) {
+      customerId = channelRow.customer_id
+      matchSource = 'channel_map'
+    }
+  }
 
   if (!customerId && isInternal) {
-    console.log('[slack/webhook] skip: internal sender with no customer context', email)
+    console.log('[slack/webhook] skip: internal sender, no user match, no channel map', email, event.channel)
     return NextResponse.json({ ok: true, skipped: 'internal_no_context' })
   }
 
@@ -189,6 +205,7 @@ export async function POST(req: NextRequest) {
     })
 
     customerId = newCustomer.id
+    matchSource = 'auto_created'
   }
 
   const occurredAt = new Date(parseFloat(event.ts) * 1000).toISOString()
@@ -209,6 +226,7 @@ export async function POST(req: NextRequest) {
       slack_user_email: email,
       thread_ts: event.thread_ts ?? null,
       files: event.files ?? [],
+      match_source: matchSource,
     },
     occurred_at: occurredAt,
   }

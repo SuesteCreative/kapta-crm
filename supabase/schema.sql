@@ -31,7 +31,7 @@ create table customers (
 create table customer_identifiers (
   id          uuid primary key default gen_random_uuid(),
   customer_id uuid not null references customers(id) on delete cascade,
-  type        text not null check (type in ('email','phone','whatsapp')),
+  type        text not null check (type in ('email','phone','whatsapp','slack_channel')),
   value       text not null,          -- e.g. "pedro@kapta.pt" or "+351912345678"
   is_primary  boolean not null default false,
   created_at  timestamptz not null default now(),
