@@ -45,7 +45,7 @@ create table customer_identifiers (
 create table interactions (
   id           uuid primary key default gen_random_uuid(),
   customer_id  uuid not null references customers(id) on delete cascade,
-  type         text not null check (type in ('email','whatsapp','meeting','call','note')),
+  type         text not null check (type in ('email','whatsapp','meeting','call','note','slack')),
   direction    text check (direction in ('inbound','outbound')),   -- null for meetings/notes
   subject      text,
   content      text,

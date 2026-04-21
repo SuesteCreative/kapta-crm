@@ -1,5 +1,5 @@
 export type CustomerStatus = 'onboarding' | 'active' | 'at-risk' | 'troubleshooting' | 'churned'
-export type InteractionType = 'email' | 'whatsapp' | 'meeting' | 'call' | 'note'
+export type InteractionType = 'email' | 'whatsapp' | 'meeting' | 'call' | 'note' | 'slack'
 export type Direction = 'inbound' | 'outbound'
 export type Priority = 'low' | 'medium' | 'high' | 'urgent'
 export type FollowUpStatus = 'open' | 'done' | 'snoozed'
