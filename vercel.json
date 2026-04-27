@@ -3,9 +3,16 @@
     {
       "path": "/api/imap/sync",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/send-scheduled",
+      "schedule": "*/15 * * * *"
     }
   ],
   "functions": {
+    "app/api/cron/send-scheduled/route.ts": {
+      "maxDuration": 60
+    },
     "app/api/imap/sync/route.ts": {
       "maxDuration": 60
     },

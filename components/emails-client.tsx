@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Mail, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
-  ExternalLink, Paperclip, Reply, PenSquare, FileText, Trash2,
+  ExternalLink, Paperclip, Reply, PenSquare, FileText, Trash2, Clock,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
@@ -58,6 +58,15 @@ interface DraftRow {
   body: string | null
   prompt: string | null
   updated_at: string
+}
+
+interface ScheduledRow {
+  id: string
+  to_recipients: string[]
+  subject: string
+  scheduled_for: string
+  status: string
+  last_error: string | null
 }
 
 function draftLabel(d: DraftRow): string {
@@ -121,6 +130,9 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [drafts, setDrafts]             = useState<DraftRow[]>([])
   const [draftsOpen, setDraftsOpen]     = useState(false)
   const draftsRef                       = useRef<HTMLDivElement>(null)
+  const [scheduled, setScheduled]       = useState<ScheduledRow[]>([])
+  const [scheduledOpen, setScheduledOpen] = useState(false)
+  const scheduledRef                    = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetch('/api/email/drafts')
@@ -128,6 +140,39 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
       .then((json) => { if (json.ok) setDrafts(json.drafts ?? []) })
       .catch(() => { /* silent */ })
   }, [composeOpen]) // refresh when compose dialog closes (in case a draft was saved or sent)
+
+  useEffect(() => {
+    fetch('/api/email/schedule')
+      .then((r) => r.json())
+      .then((json) => { if (json.ok) setScheduled(json.scheduled ?? []) })
+      .catch(() => { /* silent */ })
+
+    // Process due scheduled emails when Pedro opens the page (cron fallback)
+    fetch('/api/cron/send-scheduled').catch(() => { /* silent */ })
+  }, [composeOpen])
+
+  useEffect(() => {
+    if (!scheduledOpen) return
+    function onClick(ev: MouseEvent) {
+      if (scheduledRef.current && !scheduledRef.current.contains(ev.target as Node)) {
+        setScheduledOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [scheduledOpen])
+
+  async function cancelScheduled(id: string) {
+    try {
+      const res = await fetch(`/api/email/schedule/${id}`, { method: 'DELETE' })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error)
+      setScheduled((prev) => prev.filter((s) => s.id !== id))
+      toast.success('Envio cancelado')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao cancelar.')
+    }
+  }
 
   useEffect(() => {
     if (!draftsOpen) return
@@ -275,6 +320,75 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
             <PenSquare className="h-3.5 w-3.5" />
             Novo email
           </button>
+
+          {scheduled.length > 0 && (
+            <div ref={scheduledRef} className="relative">
+              <button
+                onClick={() => setScheduledOpen((v) => !v)}
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-opacity hover:opacity-70"
+                style={{
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--foreground)',
+                }}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                Agendados
+                <span
+                  className="rounded-full px-1.5 text-[10.5px] font-bold"
+                  style={{ background: 'rgba(245,158,11,0.15)', color: '#B45309' }}
+                >
+                  {scheduled.length}
+                </span>
+              </button>
+              {scheduledOpen && (
+                <div
+                  className="absolute right-0 top-full mt-1 w-[340px] z-30 rounded-lg overflow-hidden"
+                  style={{
+                    background: 'var(--card)',
+                    border: '1px solid var(--border)',
+                    boxShadow: 'var(--shadow-card)',
+                    maxHeight: 360,
+                    overflowY: 'auto',
+                  }}
+                >
+                  {scheduled.map((s) => {
+                    const at = new Date(s.scheduled_for)
+                    const overdue = at.getTime() < Date.now() && s.status === 'pending'
+                    const failed = s.status === 'failed'
+                    return (
+                      <div
+                        key={s.id}
+                        className="flex items-start gap-2 px-3 py-2"
+                        style={{ borderBottom: '1px solid var(--border)' }}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12.5px] font-medium truncate" style={{ color: 'var(--foreground)' }}>
+                            {s.subject || '(sem assunto)'}
+                          </p>
+                          <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--muted-foreground)' }}>
+                            {s.to_recipients.join(', ')}
+                          </p>
+                          <p className="text-[10.5px] mt-0.5" style={{
+                            color: failed ? '#EF4444' : overdue ? '#F59E0B' : 'var(--muted-foreground)',
+                          }}>
+                            {failed ? `Falhou: ${s.last_error ?? 'erro'}` : at.toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' })}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => cancelScheduled(s.id)}
+                          className="opacity-50 hover:opacity-100 p-1 rounded shrink-0"
+                          title="Cancelar envio"
+                        >
+                          <X className="h-3 w-3" style={{ color: 'var(--muted-foreground)' }} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {drafts.length > 0 && (
             <div ref={draftsRef} className="relative">

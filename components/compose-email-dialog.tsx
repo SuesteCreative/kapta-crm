@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Sparkles, Loader2, Paperclip, Image as ImageIcon, X, ChevronDown, ChevronUp, Save } from 'lucide-react'
+import { Sparkles, Loader2, Paperclip, Image as ImageIcon, X, ChevronDown, ChevronUp, Save, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { RecipientPicker, type Recipient } from '@/components/recipient-picker'
 import { uploadAttachment, type UploadedAttachment, MAX_ATTACHMENT_BYTES } from '@/lib/upload-attachment'
@@ -45,6 +45,10 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
   const [draftId, setDraftId]             = useState<string | null>(initialDraftId)
   const [savingDraft, setSavingDraft]     = useState(false)
   const [loadingDraft, setLoadingDraft]   = useState(false)
+  const [scheduling, setScheduling]       = useState(false)
+  const [scheduleOpen, setScheduleOpen]   = useState(false)
+  const [customScheduleAt, setCustomScheduleAt] = useState('')
+  const scheduleMenuRef = useRef<HTMLDivElement>(null)
 
   const bodyRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -264,6 +268,86 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
 
   function removeAttachment(idx: number) {
     setAttachments((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  // Close schedule menu on outside click
+  useEffect(() => {
+    if (!scheduleOpen) return
+    function onClick(ev: MouseEvent) {
+      if (scheduleMenuRef.current && !scheduleMenuRef.current.contains(ev.target as Node)) {
+        setScheduleOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [scheduleOpen])
+
+  function buildScheduleOptions(): Array<{ key: string; label: string; at: Date }> {
+    const now = new Date()
+    const opts: Array<{ key: string; label: string; at: Date }> = []
+
+    // +1h
+    const inOneHour = new Date(now.getTime() + 60 * 60 * 1000)
+    opts.push({ key: '+1h', label: 'Daqui a 1 hora', at: inOneHour })
+
+    // Today 18:00 if before
+    const today18 = new Date(now); today18.setHours(18, 0, 0, 0)
+    if (today18.getTime() > now.getTime() + 30 * 60 * 1000) {
+      opts.push({ key: 'today18', label: 'Hoje às 18:00', at: today18 })
+    }
+
+    // Tomorrow 09:00
+    const tomorrow9 = new Date(now); tomorrow9.setDate(tomorrow9.getDate() + 1); tomorrow9.setHours(9, 0, 0, 0)
+    opts.push({ key: 'tomorrow9', label: 'Amanhã às 09:00', at: tomorrow9 })
+
+    // Next Monday 09:00
+    const nextMon = new Date(now)
+    const daysUntilMon = (8 - nextMon.getDay()) % 7 || 7
+    nextMon.setDate(nextMon.getDate() + daysUntilMon)
+    nextMon.setHours(9, 0, 0, 0)
+    opts.push({ key: 'nextMon', label: 'Próxima segunda às 09:00', at: nextMon })
+
+    return opts
+  }
+
+  async function scheduleAt(at: Date) {
+    if (to.length === 0 || !subject.trim() || !body.trim()) {
+      toast.error('Preenche destinatários, assunto e corpo.')
+      return
+    }
+    if (at.getTime() < Date.now() + 30_000) {
+      toast.error('A data tem de ser no futuro.')
+      return
+    }
+    setScheduling(true)
+    try {
+      const primary = to.find((r) => r.customer_id)?.customer_id ?? null
+      const res = await fetch('/api/email/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: primary,
+          to:  to.map((r) => r.email),
+          cc:  cc.map((r) => r.email),
+          bcc: bcc.map((r) => r.email),
+          subject,
+          body,
+          attachments: attachments.map((a) => ({ name: a.name, url: a.url, mime: a.mime, size: a.size })),
+          scheduled_for: at.toISOString(),
+        }),
+      })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      await deleteDraftIfAny()
+      toast.success(`Agendado para ${at.toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' })}`)
+      handleClose()
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao agendar.')
+    } finally {
+      setScheduling(false)
+      setScheduleOpen(false)
+    }
   }
 
   async function handleSend() {
@@ -560,13 +644,90 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
               ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> A guardar…</>
               : <><Save className="h-3.5 w-3.5" /> {draftId ? 'Atualizar rascunho' : 'Guardar rascunho'}</>}
           </Button>
-          <Button
-            onClick={handleSend}
-            disabled={sending || drafting || to.length === 0 || !subject.trim() || !body.trim()}
-            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
-          >
-            {sending ? 'A enviar…' : 'Enviar email'}
-          </Button>
+          <div ref={scheduleMenuRef} className="relative inline-flex">
+            <Button
+              onClick={handleSend}
+              disabled={sending || scheduling || drafting || to.length === 0 || !subject.trim() || !body.trim()}
+              className="rounded-r-none"
+              style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+            >
+              {sending ? 'A enviar…' : 'Enviar email'}
+            </Button>
+            <button
+              type="button"
+              onClick={() => setScheduleOpen((v) => !v)}
+              disabled={sending || scheduling}
+              className="px-2 rounded-r-md text-[12px] font-medium transition-opacity hover:opacity-80 disabled:opacity-50 flex items-center"
+              style={{
+                background: 'var(--primary)',
+                color: 'var(--primary-foreground)',
+                borderLeft: '1px solid rgba(255,255,255,0.25)',
+              }}
+              title="Agendar envio"
+            >
+              {scheduling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+
+            {scheduleOpen && (
+              <div
+                className="absolute right-0 bottom-full mb-1 w-[260px] z-30 rounded-lg overflow-hidden"
+                style={{
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
+                  boxShadow: 'var(--shadow-card)',
+                }}
+              >
+                <div
+                  className="px-3 py-2 flex items-center gap-2"
+                  style={{ borderBottom: '1px solid var(--border)' }}
+                >
+                  <Clock className="h-3 w-3" style={{ color: 'var(--muted-foreground)' }} />
+                  <span className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--muted-foreground)' }}>
+                    Agendar envio
+                  </span>
+                </div>
+                {buildScheduleOptions().map((o) => (
+                  <button
+                    key={o.key}
+                    onClick={() => scheduleAt(o.at)}
+                    className="w-full text-left px-3 py-2 row-hover"
+                    style={{ borderBottom: '1px solid var(--border)' }}
+                  >
+                    <p className="text-[12.5px] font-medium" style={{ color: 'var(--foreground)' }}>{o.label}</p>
+                    <p className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
+                      {o.at.toLocaleString('pt-PT', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </button>
+                ))}
+                <div className="px-3 py-2 flex flex-col gap-1.5">
+                  <Label className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>Data específica</Label>
+                  <Input
+                    type="datetime-local"
+                    value={customScheduleAt}
+                    onChange={(e) => setCustomScheduleAt(e.target.value)}
+                    style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', height: 32, fontSize: 12 }}
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      if (!customScheduleAt) return
+                      const at = new Date(customScheduleAt)
+                      if (Number.isNaN(at.getTime())) {
+                        toast.error('Data inválida.')
+                        return
+                      }
+                      scheduleAt(at)
+                    }}
+                    disabled={!customScheduleAt || scheduling}
+                    className="h-8 text-[12px]"
+                    style={{ background: 'var(--foreground)', color: 'var(--card)' }}
+                  >
+                    Agendar
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
