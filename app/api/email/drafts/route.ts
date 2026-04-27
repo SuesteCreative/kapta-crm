@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import { requireAuth } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +18,9 @@ interface UpsertBody {
   inline_images?: unknown[]
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = requireAuth(req)
+  if (denied) return denied
   const supabase = createServiceClient()
   const { data, error } = await supabase
     .from('email_drafts')
@@ -30,6 +33,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const denied = requireAuth(req)
+  if (denied) return denied
   let body: UpsertBody
   try {
     body = await req.json()

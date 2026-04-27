@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import { requireAuth } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = requireAuth(request)
+  if (denied) return denied
   const { id } = await params
   const supabase = createServiceClient()
   const { data, error } = await supabase
@@ -20,9 +23,11 @@ export async function GET(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = requireAuth(request)
+  if (denied) return denied
   const { id } = await params
   const supabase = createServiceClient()
   const { error } = await supabase.from('email_drafts').delete().eq('id', id)

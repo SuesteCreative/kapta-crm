@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import { requireAuth } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +13,8 @@ function digitsOnly(s: string): string {
 }
 
 export async function POST(req: Request) {
+  const denied = requireAuth(req)
+  if (denied) return denied
   let body: RequestBody
   try {
     body = await req.json()

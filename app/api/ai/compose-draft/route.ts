@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 import { buildCustomerContext } from '@/lib/customer-context'
+import { requireAuth } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -76,6 +77,8 @@ interface ComposeRequest {
 }
 
 export async function POST(req: Request) {
+  const denied = requireAuth(req)
+  if (denied) return denied
   let data: ComposeRequest
   try {
     data = await req.json()
