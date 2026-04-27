@@ -31,16 +31,17 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
 
   let secondaryInteractions: typeof primaryInteractions = []
   if (emailValues.length > 0) {
-    const results = await Promise.all(
-      emailValues.map((email: string) =>
-        supabase
-          .from('interactions')
-          .select('*')
-          .eq('metadata->>matched_email', email)
-          .neq('customer_id', id)
-      )
-    )
-    secondaryInteractions = results.flatMap((r) => r.data ?? [])
+    // Single query covering all of this customer's email aliases.
+    // PostgREST OR-of-eq form: metadata->>matched_email.eq.foo,metadata->>matched_email.eq.bar
+    const orClauses = emailValues
+      .map((e: string) => `metadata->>matched_email.eq.${e.replace(/,/g, '')}`)
+      .join(',')
+    const { data } = await supabase
+      .from('interactions')
+      .select('*')
+      .or(orClauses)
+      .neq('customer_id', id)
+    secondaryInteractions = data ?? []
   }
 
   // Merge + deduplicate + sort newest-first

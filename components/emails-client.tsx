@@ -60,14 +60,14 @@ function buildReplyAllState(email: EmailRow): ComposeInitialState {
   return { to, cc, subject }
 }
 
-function buildForwardState(email: EmailRow): ComposeInitialState {
+function buildForwardState(email: EmailRow, fetchedContent: string | null): ComposeInitialState {
   const rawSubject = email.subject ?? ''
   const subject = /^fwd?:/i.test(rawSubject) ? rawSubject : (rawSubject ? `Fwd: ${rawSubject}` : 'Fwd: ')
 
   const sender = email.customers
   const senderName = sender ? `${sender.name}${sender.company ? ` (${sender.company})` : ''}` : '—'
   const date = new Date(email.occurred_at).toLocaleString('pt-PT')
-  const quoted = email.content ? stripHtml(email.content).slice(0, 4000) : ''
+  const quoted = fetchedContent ? stripHtml(fetchedContent).slice(0, 4000) : ''
 
   const body = `\n\n----- Mensagem encaminhada -----\nDe: ${senderName}\nData: ${date}\nAssunto: ${rawSubject}\n\n${quoted}`
 
@@ -87,7 +87,6 @@ interface EmailRow {
   customer_id: string
   direction: string | null
   subject: string | null
-  content: string | null
   occurred_at: string
   metadata: Record<string, unknown> | null
   customers: {
@@ -177,6 +176,9 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [composeOpen, setComposeOpen]   = useState(false)
   const [composeDraftId, setComposeDraftId] = useState<string | null>(null)
   const [composeInitial, setComposeInitial] = useState<ComposeInitialState | null>(null)
+  const [selectedContent, setSelectedContent] = useState<string | null>(null)
+  const [selectedHtml, setSelectedHtml]       = useState<string | null>(null)
+  const [contentLoading, setContentLoading]   = useState(false)
   const [drafts, setDrafts]             = useState<DraftRow[]>([])
   const [draftsOpen, setDraftsOpen]     = useState(false)
   const draftsRef                       = useRef<HTMLDivElement>(null)
@@ -229,11 +231,46 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
     setComposeOpen(true)
   }
 
-  function openForward(email: EmailRow) {
+  async function openForward(email: EmailRow) {
+    let content: string | null = selectedContent
+    if (!content || email.id !== selectedId) {
+      const { data } = await supabase
+        .from('interactions')
+        .select('content')
+        .eq('id', email.id)
+        .maybeSingle()
+      content = (data?.content as string | null) ?? null
+    }
     setComposeDraftId(null)
-    setComposeInitial(buildForwardState(email))
+    setComposeInitial(buildForwardState(email, content))
     setComposeOpen(true)
   }
+
+  // Lazy-fetch full body + html when an email is selected
+  useEffect(() => {
+    if (!selectedId) {
+      setSelectedContent(null)
+      setSelectedHtml(null)
+      return
+    }
+    let cancelled = false
+    setContentLoading(true)
+    setSelectedContent(null)
+    setSelectedHtml(null)
+    supabase
+      .from('interactions')
+      .select('content, metadata')
+      .eq('id', selectedId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        const meta = data?.metadata as Record<string, unknown> | null
+        setSelectedContent((data?.content as string | null) ?? null)
+        setSelectedHtml((meta?.html as string | null | undefined) ?? null)
+      })
+      .then(() => { if (!cancelled) setContentLoading(false) })
+    return () => { cancelled = true }
+  }, [selectedId])
 
   async function openReply(email: EmailRow) {
     const matched = email.metadata?.matched_email as string | undefined
@@ -312,8 +349,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
       !search ||
       (e.subject ?? '').toLowerCase().includes(q) ||
       (e.customers?.name ?? '').toLowerCase().includes(q) ||
-      (e.customers?.company ?? '').toLowerCase().includes(q) ||
-      (e.content ?? '').toLowerCase().includes(q)
+      (e.customers?.company ?? '').toLowerCase().includes(q)
     const matchesDir = !dirFilter || e.direction === dirFilter
     const notSpam = e.metadata?.is_spam !== true
     return matchesSearch && matchesDir && notSpam && !dismissedIds.has(e.id)
@@ -527,16 +563,11 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                     {email.subject ?? '(sem assunto)'}
                   </p>
 
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {email.content && (
-                      <p className="text-[11.5px] truncate flex-1" style={{ color: 'var(--muted-foreground)' }}>
-                        {stripHtml(email.content).slice(0, 120)}
-                      </p>
-                    )}
-                    {attachments.length > 0 && (
+                  {attachments.length > 0 && (
+                    <div className="flex items-center gap-2 mt-0.5">
                       <Paperclip className="h-3 w-3 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Dismiss */}
@@ -578,8 +609,8 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
             const cc          = selected.metadata?.cc  as string | null | undefined
             const bcc         = selected.metadata?.bcc as string | null | undefined
             const attachments = (selected.metadata?.attachments as Attachment[] | undefined) ?? []
-            const htmlBody    = selected.metadata?.html as string | undefined
-            const body        = selected.content ? stripHtml(selected.content) : ''
+            const htmlBody    = selectedHtml ?? undefined
+            const body        = selectedContent ? stripHtml(selectedContent) : ''
 
             return (
               <div className="flex flex-col" style={{ maxHeight: 'calc(100vh - 3rem)' }}>
@@ -679,18 +710,20 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                 </div>
 
                 {/* AI action suggestions */}
-                <EmailActionPanel
-                  interactionId={selected.id}
-                  customerId={selected.customer_id}
-                  customerName={selected.customers?.name ?? ''}
-                  customerCompany={selected.customers?.company ?? null}
-                  email={{
-                    direction: (selected.direction as 'inbound' | 'outbound' | null) ?? null,
-                    subject: selected.subject,
-                    content: selected.content,
-                    occurred_at: selected.occurred_at,
-                  }}
-                />
+                {!contentLoading && selectedContent !== null && (
+                  <EmailActionPanel
+                    interactionId={selected.id}
+                    customerId={selected.customer_id}
+                    customerName={selected.customers?.name ?? ''}
+                    customerCompany={selected.customers?.company ?? null}
+                    email={{
+                      direction: (selected.direction as 'inbound' | 'outbound' | null) ?? null,
+                      subject: selected.subject,
+                      content: selectedContent,
+                      occurred_at: selected.occurred_at,
+                    }}
+                  />
+                )}
 
                 {/* Attachments */}
                 {attachments.length > 0 && (
@@ -722,7 +755,9 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
 
                 {/* Body */}
                 <div className="px-5 py-4 overflow-auto flex-1">
-                  <EmailHtmlViewer html={htmlBody} text={body} />
+                  {contentLoading
+                    ? <div className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>A carregar mensagem…</div>
+                    : <EmailHtmlViewer html={htmlBody} text={body} />}
                 </div>
               </div>
             )

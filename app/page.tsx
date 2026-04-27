@@ -40,16 +40,18 @@ async function getDashboardData() {
       .from('tickets')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'open'),
-    // Emails to compute who needs a reply + AI actions
+    // Emails to compute who needs a reply + AI actions.
+    // Only inbound rows are rendered, so filter server-side to halve the row pull.
     supabase
       .from('interactions')
       .select('id, customer_id, direction, subject, occurred_at, metadata, customers(id, name, company)')
       .eq('type', 'email')
+      .eq('direction', 'inbound')
       .order('occurred_at', { ascending: false })
-      .limit(300),
+      .limit(100),
   ])
 
-  // Compute: most recent email per customer, keep inbound-last only
+  // Compute: most recent inbound email per customer
   const allEmails = (emailsRes.data ?? []) as RawEmail[]
   const byCustomer = new Map<string, RawEmail>()
   for (const e of allEmails) {
