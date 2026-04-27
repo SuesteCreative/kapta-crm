@@ -7,10 +7,18 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Sparkles, Loader2, Paperclip, Image as ImageIcon, X, ChevronDown, ChevronUp, Save, Clock, AlertTriangle } from 'lucide-react'
+import { Sparkles, Loader2, Paperclip, Image as ImageIcon, X, ChevronDown, ChevronUp, Save, Clock, AlertTriangle, Wand2 } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
+import { supabase } from '@/lib/supabase'
 import { RecipientPicker, type Recipient } from '@/components/recipient-picker'
 import { uploadAttachment, type UploadedAttachment, MAX_ATTACHMENT_BYTES } from '@/lib/upload-attachment'
+
+interface PromptPreset {
+  id: string
+  name: string
+  body: string
+}
 
 export interface ComposeInitialState {
   to?: Recipient[]
@@ -82,6 +90,7 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
   const [scheduleOpen, setScheduleOpen]   = useState(false)
   const [customScheduleAt, setCustomScheduleAt] = useState('')
   const scheduleMenuRef = useRef<HTMLDivElement>(null)
+  const [presets, setPresets]             = useState<PromptPreset[]>([])
 
   const bodyRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -124,6 +133,24 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
       })
       .finally(() => setLoadingDraft(false))
   }, [open, initialDraftId])
+
+  // Load prompt presets when dialog opens
+  useEffect(() => {
+    if (!open) return
+    supabase
+      .from('templates')
+      .select('id, name, body')
+      .eq('type', 'compose-prompt')
+      .order('name')
+      .then(({ data }) => setPresets((data ?? []) as PromptPreset[]))
+  }, [open])
+
+  function applyPreset(id: string) {
+    const p = presets.find((x) => x.id === id)
+    if (!p) return
+    setPrompt(p.body)
+    toast.success(`Preset aplicado: ${p.name}`)
+  }
 
   // Apply initialState (for Reply All / Forward) when provided and no draft is loading
   useEffect(() => {
@@ -492,9 +519,29 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
 
           {/* Prompt + AI button */}
           <div className="space-y-1.5">
-            <Label className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>
-              Diz à IA o que queres dizer
-            </Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>
+                Diz à IA o que queres dizer
+              </Label>
+              {presets.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Wand2 className="h-3 w-3" style={{ color: 'var(--muted-foreground)' }} />
+                  <Select onValueChange={applyPreset}>
+                    <SelectTrigger
+                      className="h-7 text-[11.5px] gap-1"
+                      style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', minWidth: 180 }}
+                    >
+                      <SelectValue placeholder="Preset…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {presets.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
             <Textarea
               rows={3}
               value={prompt}
