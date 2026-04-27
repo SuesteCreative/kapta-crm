@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Mail, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
-  ExternalLink, Paperclip, Reply,
+  ExternalLink, Paperclip, Reply, PenSquare,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase'
 import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
 import { EmailActionPanel } from '@/components/email-action-panel'
+import { ComposeEmailDialog } from '@/components/compose-email-dialog'
 import type { Interaction, CustomerIdentifier } from '@/lib/database.types'
 
 interface Attachment {
@@ -91,6 +92,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [replyOpen, setReplyOpen]       = useState(false)
   const [replyCtx, setReplyCtx]         = useState<ReplyContext | null>(null)
   const [replyLoading, setReplyLoading] = useState(false)
+  const [composeOpen, setComposeOpen]   = useState(false)
 
   async function openReply(email: EmailRow) {
     const matched = email.metadata?.matched_email as string | undefined
@@ -191,21 +193,35 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
             {emails.length - dismissedIds.size} emails sincronizados
           </p>
         </div>
-        <button
-          onClick={() => syncNow()}
-          disabled={syncing}
-          className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-opacity hover:opacity-70 disabled:opacity-40"
-          style={{
-            background: 'var(--card)',
-            border: '1px solid var(--border)',
-            color: 'var(--muted-foreground)',
-          }}
-        >
-          {syncing
-            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            : <RefreshCw className="h-3.5 w-3.5" />}
-          {syncing ? 'A sincronizar…' : 'Sincronizar'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setComposeOpen(true)}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-opacity hover:opacity-70"
+            style={{
+              background: 'var(--primary)',
+              color: 'var(--primary-foreground)',
+              border: '1px solid var(--primary)',
+            }}
+          >
+            <PenSquare className="h-3.5 w-3.5" />
+            Novo email
+          </button>
+          <button
+            onClick={() => syncNow()}
+            disabled={syncing}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-opacity hover:opacity-70 disabled:opacity-40"
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              color: 'var(--muted-foreground)',
+            }}
+          >
+            {syncing
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <RefreshCw className="h-3.5 w-3.5" />}
+            {syncing ? 'A sincronizar…' : 'Sincronizar'}
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -508,6 +524,8 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
           onClose={() => setReplyOpen(false)}
         />
       )}
+
+      <ComposeEmailDialog open={composeOpen} onClose={() => setComposeOpen(false)} />
     </div>
   )
 }
