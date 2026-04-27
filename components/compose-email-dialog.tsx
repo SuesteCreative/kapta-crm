@@ -12,10 +12,20 @@ import { toast } from 'sonner'
 import { RecipientPicker, type Recipient } from '@/components/recipient-picker'
 import { uploadAttachment, type UploadedAttachment, MAX_ATTACHMENT_BYTES } from '@/lib/upload-attachment'
 
+export interface ComposeInitialState {
+  to?: Recipient[]
+  cc?: Recipient[]
+  bcc?: Recipient[]
+  subject?: string
+  body?: string
+  prompt?: string
+}
+
 interface Props {
   open: boolean
   onClose: () => void
   draftId?: string | null
+  initialState?: ComposeInitialState | null
 }
 
 function formatBytes(n: number): string {
@@ -24,7 +34,7 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
-export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = null }: Props) {
+export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = null, initialState = null }: Props) {
   const router = useRouter()
   const [to, setTo]                       = useState<Recipient[]>([])
   const [cc, setCc]                       = useState<Recipient[]>([])
@@ -91,6 +101,18 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
       })
       .finally(() => setLoadingDraft(false))
   }, [open, initialDraftId])
+
+  // Apply initialState (for Reply All / Forward) when provided and no draft is loading
+  useEffect(() => {
+    if (!open || initialDraftId || !initialState) return
+    if (initialState.to)      setTo(initialState.to)
+    if (initialState.cc)      setCc(initialState.cc)
+    if (initialState.bcc)     setBcc(initialState.bcc)
+    if (initialState.subject) setSubject(initialState.subject)
+    if (initialState.body)    setBody(initialState.body)
+    if (initialState.prompt)  setPrompt(initialState.prompt)
+    if ((initialState.cc?.length ?? 0) + (initialState.bcc?.length ?? 0) > 0) setShowCcBcc(true)
+  }, [open, initialDraftId, initialState])
 
   async function handleSaveDraft() {
     if (to.length === 0 && !subject.trim() && !body.trim() && !prompt.trim()) {

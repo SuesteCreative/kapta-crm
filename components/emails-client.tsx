@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Mail, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
-  ExternalLink, Paperclip, Reply, PenSquare, FileText, Trash2, Clock,
+  ExternalLink, Paperclip, Reply, ReplyAll, Forward, PenSquare, FileText, Trash2, Clock,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
@@ -13,8 +13,66 @@ import { supabase } from '@/lib/supabase'
 import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
 import { EmailActionPanel } from '@/components/email-action-panel'
-import { ComposeEmailDialog } from '@/components/compose-email-dialog'
+import { ComposeEmailDialog, type ComposeInitialState } from '@/components/compose-email-dialog'
+import type { Recipient } from '@/components/recipient-picker'
 import type { Interaction, CustomerIdentifier } from '@/lib/database.types'
+
+const OWN_DOMAIN = 'kapta.pt'
+
+function parseAddressList(s: string | undefined | null): string[] {
+  if (!s) return []
+  // Strip "Name <email>" pairs and split
+  const matches = s.match(/[\w.+-]+@[\w-]+\.[\w.]+/g)
+  return matches ?? []
+}
+
+function buildReplyAllState(email: EmailRow): ComposeInitialState {
+  const matched = email.metadata?.matched_email as string | undefined
+  const customer = email.customers
+  const customerEmail = matched
+    ?? customer?.customer_identifiers?.find((i) => i.type === 'email')?.value
+    ?? ''
+
+  const ccRaw = email.metadata?.cc as string | null | undefined
+  const toRaw = email.metadata?.to as string | null | undefined
+
+  const ccCandidates = [...parseAddressList(ccRaw), ...parseAddressList(toRaw)]
+    .filter((e) => !e.toLowerCase().includes(OWN_DOMAIN))
+    .filter((e) => e.toLowerCase() !== customerEmail.toLowerCase())
+
+  const seen = new Set<string>()
+  const ccUnique = ccCandidates.filter((e) => {
+    const key = e.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
+  const to: Recipient[] = customerEmail
+    ? [{ email: customerEmail, customer_id: email.customer_id, name: customer?.name, company: customer?.company ?? null }]
+    : []
+
+  const cc: Recipient[] = ccUnique.map((e) => ({ email: e }))
+
+  const rawSubject = email.subject ?? ''
+  const subject = /^re:/i.test(rawSubject) ? rawSubject : (rawSubject ? `Re: ${rawSubject}` : '')
+
+  return { to, cc, subject }
+}
+
+function buildForwardState(email: EmailRow): ComposeInitialState {
+  const rawSubject = email.subject ?? ''
+  const subject = /^fwd?:/i.test(rawSubject) ? rawSubject : (rawSubject ? `Fwd: ${rawSubject}` : 'Fwd: ')
+
+  const sender = email.customers
+  const senderName = sender ? `${sender.name}${sender.company ? ` (${sender.company})` : ''}` : '—'
+  const date = new Date(email.occurred_at).toLocaleString('pt-PT')
+  const quoted = email.content ? stripHtml(email.content).slice(0, 4000) : ''
+
+  const body = `\n\n----- Mensagem encaminhada -----\nDe: ${senderName}\nData: ${date}\nAssunto: ${rawSubject}\n\n${quoted}`
+
+  return { subject, body }
+}
 
 interface Attachment {
   name?: string
@@ -127,6 +185,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [replyLoading, setReplyLoading] = useState(false)
   const [composeOpen, setComposeOpen]   = useState(false)
   const [composeDraftId, setComposeDraftId] = useState<string | null>(null)
+  const [composeInitial, setComposeInitial] = useState<ComposeInitialState | null>(null)
   const [drafts, setDrafts]             = useState<DraftRow[]>([])
   const [draftsOpen, setDraftsOpen]     = useState(false)
   const draftsRef                       = useRef<HTMLDivElement>(null)
@@ -205,6 +264,19 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
 
   function openNewCompose() {
     setComposeDraftId(null)
+    setComposeInitial(null)
+    setComposeOpen(true)
+  }
+
+  function openReplyAll(email: EmailRow) {
+    setComposeDraftId(null)
+    setComposeInitial(buildReplyAllState(email))
+    setComposeOpen(true)
+  }
+
+  function openForward(email: EmailRow) {
+    setComposeDraftId(null)
+    setComposeInitial(buildForwardState(email))
     setComposeOpen(true)
   }
 
@@ -659,6 +731,20 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                       Responder
                     </button>
                     <button
+                      onClick={() => openReplyAll(selected)}
+                      className="rounded-md p-1.5 hover:bg-[var(--border)]"
+                      title="Responder a todos"
+                    >
+                      <ReplyAll className="h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />
+                    </button>
+                    <button
+                      onClick={() => openForward(selected)}
+                      className="rounded-md p-1.5 hover:bg-[var(--border)]"
+                      title="Encaminhar"
+                    >
+                      <Forward className="h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />
+                    </button>
+                    <button
                       onClick={() => router.push(`/customers/${selected.customer_id}`)}
                       className="rounded p-1.5 hover:bg-[var(--border)]"
                       title="Abrir cliente"
@@ -775,7 +861,8 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
       <ComposeEmailDialog
         open={composeOpen}
         draftId={composeDraftId}
-        onClose={() => { setComposeOpen(false); setComposeDraftId(null) }}
+        initialState={composeInitial}
+        onClose={() => { setComposeOpen(false); setComposeDraftId(null); setComposeInitial(null) }}
       />
     </div>
   )
