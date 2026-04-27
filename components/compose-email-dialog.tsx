@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Sparkles, Loader2, Paperclip, Image as ImageIcon, X, ChevronDown, ChevronUp, Save, Clock } from 'lucide-react'
+import { Sparkles, Loader2, Paperclip, Image as ImageIcon, X, ChevronDown, ChevronUp, Save, Clock, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { RecipientPicker, type Recipient } from '@/components/recipient-picker'
 import { uploadAttachment, type UploadedAttachment, MAX_ATTACHMENT_BYTES } from '@/lib/upload-attachment'
@@ -32,6 +32,29 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+const INTERNAL_DOMAIN = 'kapta.pt'
+
+function isInternal(email: string): boolean {
+  return email.toLowerCase().endsWith(`@${INTERNAL_DOMAIN}`)
+}
+
+function classifyRecipients(all: Recipient[]): { internal: number; external: number; externals: string[]; internals: string[] } {
+  let internal = 0
+  let external = 0
+  const externals: string[] = []
+  const internals: string[] = []
+  for (const r of all) {
+    if (isInternal(r.email)) {
+      internal++
+      internals.push(r.email)
+    } else {
+      external++
+      externals.push(r.email)
+    }
+  }
+  return { internal, external, externals, internals }
 }
 
 export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = null, initialState = null }: Props) {
@@ -332,6 +355,19 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
     return opts
   }
 
+  function confirmMixIfAny(): boolean {
+    const all = [...to, ...cc, ...bcc]
+    const { internal, external, externals, internals } = classifyRecipients(all)
+    if (internal === 0 || external === 0) return true
+    const lines = [
+      `Vais enviar para ${external} destinatário${external !== 1 ? 's' : ''} externo${external !== 1 ? 's' : ''} (${externals.slice(0, 3).join(', ')}${externals.length > 3 ? '…' : ''})`,
+      `e ${internal} interno${internal !== 1 ? 's' : ''} (${internals.slice(0, 3).join(', ')}${internals.length > 3 ? '…' : ''}).`,
+      '',
+      'Tens a certeza?',
+    ].join('\n')
+    return window.confirm(lines)
+  }
+
   async function scheduleAt(at: Date) {
     if (to.length === 0 || !subject.trim() || !body.trim()) {
       toast.error('Preenche destinatários, assunto e corpo.')
@@ -341,6 +377,7 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
       toast.error('A data tem de ser no futuro.')
       return
     }
+    if (!confirmMixIfAny()) return
     setScheduling(true)
     try {
       const primary = to.find((r) => r.customer_id)?.customer_id ?? null
@@ -377,6 +414,7 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
       toast.error('Preenche destinatários, assunto e corpo.')
       return
     }
+    if (!confirmMixIfAny()) return
     setSending(true)
     try {
       const primary = to.find((r) => r.customer_id)?.customer_id ?? null
@@ -434,6 +472,23 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
               <RecipientPicker label="BCC" value={bcc} onChange={setBcc} />
             </>
           )}
+
+          {/* Mix warning */}
+          {(() => {
+            const { internal, external } = classifyRecipients([...to, ...cc, ...bcc])
+            if (internal === 0 || external === 0) return null
+            return (
+              <div
+                className="rounded-lg p-3 flex items-start gap-2"
+                style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}
+              >
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" style={{ color: '#B45309' }} />
+                <p className="text-[12px]" style={{ color: 'var(--foreground)' }}>
+                  <strong>Mistura interna + externa:</strong> tens {external} externo{external !== 1 ? 's' : ''} e {internal} interno{internal !== 1 ? 's' : ''} nas listas. O cliente externo vê os emails internos no CC. Confirma antes de enviar.
+                </p>
+              </div>
+            )
+          })()}
 
           {/* Prompt + AI button */}
           <div className="space-y-1.5">
