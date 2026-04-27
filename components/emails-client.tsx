@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
+import { EmailActionPanel } from '@/components/email-action-panel'
 import type { Interaction, CustomerIdentifier } from '@/lib/database.types'
 
 interface Attachment {
@@ -441,6 +442,20 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                     </div>
                   )}
                 </div>
+
+                {/* AI action suggestions */}
+                <EmailActionPanel
+                  interactionId={selected.id}
+                  customerId={selected.customer_id}
+                  customerName={selected.customers?.name ?? ''}
+                  customerCompany={selected.customers?.company ?? null}
+                  email={{
+                    direction: (selected.direction as 'inbound' | 'outbound' | null) ?? null,
+                    subject: selected.subject,
+                    content: selected.content,
+                    occurred_at: selected.occurred_at,
+                  }}
+                />
 
                 {/* Attachments */}
                 {attachments.length > 0 && (

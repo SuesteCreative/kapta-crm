@@ -5,9 +5,10 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Users, CalendarCheck, Ticket,
-  FileText, RefreshCw, ChevronRight, Loader2, Building2, Settings, Mail, LogOut,
+  FileText, RefreshCw, ChevronRight, Loader2, Building2, Settings, Mail, LogOut, ClipboardPaste,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { GlobalPasteDialog } from '@/components/global-paste-dialog'
 
 const nav = [
   { href: '/',            label: 'Dashboard',   icon: LayoutDashboard },
@@ -23,12 +24,24 @@ const nav = [
 export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const [syncing, setSyncing] = useState(false)
+  const [syncing, setSyncing]   = useState(false)
+  const [pasteOpen, setPasteOpen] = useState(false)
 
-  if (pathname === '/login') return null
+  // Global keyboard shortcut: Cmd/Ctrl + Shift + V
+  useEffect(() => {
+    function onKey(ev: KeyboardEvent) {
+      if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && ev.key.toLowerCase() === 'v') {
+        ev.preventDefault()
+        setPasteOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Auto-sync on app open — but at most once every 10 minutes
   useEffect(() => {
+    if (pathname === '/login') return
     const INTERVAL_MS = 10 * 60 * 1000
     const lastSync = Number(localStorage.getItem('lastEmailSync') ?? 0)
     if (Date.now() - lastSync > INTERVAL_MS) {
@@ -36,6 +49,8 @@ export function Sidebar() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  if (pathname === '/login') return null
 
   async function syncEmail(silent = false) {
     setSyncing(true)
@@ -142,6 +157,16 @@ export function Sidebar() {
         style={{ borderTop: '1px solid var(--sidebar-border)' }}
       >
         <button
+          onClick={() => setPasteOpen(true)}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-all duration-150 hover:opacity-80"
+          style={{ color: 'var(--sidebar-muted)' }}
+          title="Colar conversa (Ctrl+Shift+V)"
+        >
+          <ClipboardPaste className="h-[14px] w-[14px] shrink-0" />
+          <span>Colar conversa</span>
+        </button>
+
+        <button
           onClick={() => syncEmail()}
           disabled={syncing}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-all duration-150 disabled:opacity-50 hover:opacity-80"
@@ -178,6 +203,8 @@ export function Sidebar() {
           </button>
         </div>
       </div>
+
+      <GlobalPasteDialog open={pasteOpen} onClose={() => setPasteOpen(false)} />
     </aside>
   )
 }

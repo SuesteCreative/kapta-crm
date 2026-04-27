@@ -68,3 +68,41 @@ export function parsePlainConversation(raw: string): ParsedMessage[] {
     occurred_at: new Date().toISOString(),
   }]
 }
+
+/**
+ * Extract a phone number from a WhatsApp export header or first messages.
+ * Handles "+351 912 345 678", "+351912345678", "00351912345678", "912345678".
+ * Returns digits only (no spaces) with leading + preserved if present.
+ * Returns null when nothing plausible is found.
+ */
+export function extractPhoneFromHeader(raw: string): string | null {
+  if (!raw) return null
+  const head = raw.slice(0, 2000)
+
+  // Prefer explicit international format with +
+  const intl = head.match(/\+\d[\d\s.\-()]{7,16}\d/)
+  if (intl) return normalizePhone(intl[0])
+
+  // Then "00" international prefix
+  const zeroPrefixed = head.match(/\b00\d[\d\s.\-()]{7,16}\d/)
+  if (zeroPrefixed) {
+    const norm = normalizePhone(zeroPrefixed[0])
+    return norm.replace(/^00/, '+')
+  }
+
+  // Continuous 9-15 digit sequence (national number)
+  const national = head.match(/\b\d{9,15}\b/)
+  if (national) return normalizePhone(national[0])
+
+  return null
+}
+
+function normalizePhone(raw: string): string {
+  const trimmed = raw.trim()
+  const digits = trimmed.replace(/[^\d+]/g, '')
+  // Avoid stray + in the middle (shouldn't happen, but be safe)
+  if (digits.startsWith('+')) {
+    return '+' + digits.slice(1).replace(/\+/g, '')
+  }
+  return digits
+}

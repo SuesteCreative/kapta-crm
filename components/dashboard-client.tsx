@@ -8,6 +8,8 @@ import {
 } from 'lucide-react'
 import { dueDateLabel, STATUS_STYLES, STATUS_LABELS, PRIORITY_STYLES } from '@/lib/utils'
 import type { FollowUp, Customer } from '@/lib/database.types'
+import { UnlinkedMeetingsWidget } from '@/components/unlinked-meetings-widget'
+import { CommitmentsWidget } from '@/components/commitments-widget'
 
 type FollowUpWithCustomer = FollowUp & { customers: { name: string; company: string | null } | null }
 
@@ -197,6 +199,12 @@ export function DashboardClient({ data }: { data: DashboardData }) {
           )}
         </div>
       )}
+
+      {/* Unlinked meetings — only renders when there are pending */}
+      <UnlinkedMeetingsWidget />
+
+      {/* Commitments to confirm */}
+      <CommitmentsWidget />
 
       {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1rem' }}>

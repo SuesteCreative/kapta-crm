@@ -196,6 +196,7 @@ export function SendEmailDialog({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          customer_id: customerId,
           customer_name: customerName,
           customer_company: customerCompany ?? null,
           language,

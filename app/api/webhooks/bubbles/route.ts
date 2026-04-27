@@ -90,12 +90,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, matched: true, customer_id: customerId })
   }
 
-  // No match — store as unlinked note so Pedro can assign later
-  // Use a placeholder customer_id approach: log and return info
+  // No match — park in unlinked_meetings for Pedro to assign from dashboard
+  const { data: unlinked, error } = await supabase
+    .from('unlinked_meetings')
+    .insert({
+      title,
+      summary,
+      transcript,
+      bubbles_url: url || null,
+      attendees: emails,
+      recorded_at: occurredAt,
+    })
+    .select('id')
+    .single()
+
+  if (error) {
+    console.error('Failed to park unlinked meeting:', error)
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+  }
+
   return NextResponse.json({
     ok: true,
     matched: false,
-    message: 'No customer matched for emails: ' + emails.join(', '),
+    unlinked_meeting_id: unlinked.id,
     emails,
   })
 }
