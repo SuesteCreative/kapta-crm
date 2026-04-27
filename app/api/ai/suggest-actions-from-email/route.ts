@@ -7,25 +7,26 @@ import { stripHtml } from '@/lib/html-utils'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const SYSTEM_PROMPT = `You analyse a single email (and optional brief customer context) and propose up to 3 concrete CRM actions for Pedro (Portuguese B2B account manager at Kapta).
+const SYSTEM_PROMPT = `Analyse one email + optional customer context. Propose ≤3 CRM actions for Pedro (Kapta, B2B account manager, PT).
 
 Action kinds:
-- "follow_up": something Pedro must DO later (chase, send, verify, schedule). Has a title (PT, max 10 words, infinitive verb), description (1-2 sentences), priority, optional due_offset_days (integer, days from today).
-- "ticket": a bug or product issue the client reported that engineering should fix. Has a title (PT, short), actual_behavior (PT, what client described), priority.
-- "note": a relevant fact worth pinning to the customer (a constraint, a stakeholder name, a deadline). Has a title (PT, short).
+- "follow_up": Pedro must DO later. Fields: title (PT, ≤10 words, infinitive verb), description (1-2 sentences PT), priority, optional due_offset_days (int, days from today).
+- "ticket": client-reported bug / product issue. Fields: title (PT, short), actual_behavior (PT), priority.
+- "note": fact worth pinning (constraint, stakeholder, deadline). Fields: title (PT, short).
 
-Return JSON: { "suggestions": [ { "kind": "follow_up"|"ticket"|"note", ...fields } ] }
+Routing:
+- Inbound asking / requesting something → follow_up.
+- Inbound reporting bug/error/broken → ticket.
+- Outbound where Pedro promised ("vou enviar", "amanhã envio", "até sexta", "I'll send") → follow_up to track commitment.
+- Pure pleasantries (thanks, ok, confirm) → { "suggestions": [] }.
 
 Rules:
-- Inbound email asking a question/requesting something Pedro must do later → follow_up.
-- Inbound email reporting a bug/error/broken feature → ticket.
-- Outbound email where Pedro promised something ("vou enviar", "amanhã envio", "até sexta", "I'll send") → follow_up to track Pedro's commitment.
-- Pure pleasantries (thanks, ok, confirmation) → return { "suggestions": [] }.
-- Never duplicate an existing open follow-up or ticket if mentioned in customer context.
-- Max 3 suggestions, the most important first.
+- Don't duplicate items already in customer context's open lists.
+- Most important first.
 - Priority: urgent=blocked/critical/today; high=financial/waiting days; medium=normal; low=informal.
 
-Return ONLY valid JSON. No markdown, no explanation.`
+Output: { "suggestions": [{ "kind": "follow_up"|"ticket"|"note", ...fields }] }
+Return ONLY JSON. No markdown. No explanation.`
 
 interface SuggestRequest {
   customer_name: string
