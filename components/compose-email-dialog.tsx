@@ -1,13 +1,13 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Sparkles, Loader2, Paperclip, Image as ImageIcon, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Sparkles, Loader2, Paperclip, Image as ImageIcon, X, ChevronDown, ChevronUp, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { RecipientPicker, type Recipient } from '@/components/recipient-picker'
 import { uploadAttachment, type UploadedAttachment, MAX_ATTACHMENT_BYTES } from '@/lib/upload-attachment'
@@ -15,6 +15,7 @@ import { uploadAttachment, type UploadedAttachment, MAX_ATTACHMENT_BYTES } from 
 interface Props {
   open: boolean
   onClose: () => void
+  draftId?: string | null
 }
 
 function formatBytes(n: number): string {
@@ -23,7 +24,7 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
-export function ComposeEmailDialog({ open, onClose }: Props) {
+export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = null }: Props) {
   const router = useRouter()
   const [to, setTo]                       = useState<Recipient[]>([])
   const [cc, setCc]                       = useState<Recipient[]>([])
@@ -41,6 +42,9 @@ export function ComposeEmailDialog({ open, onClose }: Props) {
   const [attachments, setAttachments]     = useState<UploadedAttachment[]>([])
   const [uploadingFile, setUploadingFile] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [draftId, setDraftId]             = useState<string | null>(initialDraftId)
+  const [savingDraft, setSavingDraft]     = useState(false)
+  const [loadingDraft, setLoadingDraft]   = useState(false)
 
   const bodyRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -51,11 +55,82 @@ export function ComposeEmailDialog({ open, onClose }: Props) {
     setPrompt(''); setSubject(''); setBody(''); setRefineInput('')
     setInlineImages([]); setAttachments([])
     setLanguage('pt-PT')
+    setDraftId(null)
   }
 
   function handleClose() {
     reset()
     onClose()
+  }
+
+  // Load draft when dialog opens with a draftId
+  useEffect(() => {
+    if (!open) return
+    if (!initialDraftId) return
+    setLoadingDraft(true)
+    fetch(`/api/email/drafts/${initialDraftId}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (!json.ok || !json.draft) return
+        const d = json.draft
+        setDraftId(d.id)
+        setTo((d.to_recipients ?? []) as Recipient[])
+        setCc((d.cc_recipients ?? []) as Recipient[])
+        setBcc((d.bcc_recipients ?? []) as Recipient[])
+        setShowCcBcc(((d.cc_recipients ?? []).length + (d.bcc_recipients ?? []).length) > 0)
+        setSubject(d.subject ?? '')
+        setBody(d.body ?? '')
+        setPrompt(d.prompt ?? '')
+        setLanguage((d.language as 'pt-PT' | 'en') ?? 'pt-PT')
+        setAttachments((d.attachments ?? []) as UploadedAttachment[])
+        setInlineImages((d.inline_images ?? []) as UploadedAttachment[])
+      })
+      .finally(() => setLoadingDraft(false))
+  }, [open, initialDraftId])
+
+  async function handleSaveDraft() {
+    if (to.length === 0 && !subject.trim() && !body.trim() && !prompt.trim()) {
+      toast.error('Nada para guardar.')
+      return
+    }
+    setSavingDraft(true)
+    try {
+      const res = await fetch('/api/email/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: draftId ?? undefined,
+          primary_customer_id: to.find((r) => r.customer_id)?.customer_id ?? null,
+          to_recipients:  to,
+          cc_recipients:  cc,
+          bcc_recipients: bcc,
+          subject,
+          body,
+          prompt,
+          language,
+          attachments,
+          inline_images: inlineImages,
+        }),
+      })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      setDraftId(json.id)
+      toast.success('Rascunho guardado.')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao guardar rascunho.')
+    } finally {
+      setSavingDraft(false)
+    }
+  }
+
+  async function deleteDraftIfAny() {
+    if (!draftId) return
+    try {
+      await fetch(`/api/email/drafts/${draftId}`, { method: 'DELETE' })
+    } catch {
+      // best-effort
+    }
   }
 
   function insertAtCursor(token: string) {
@@ -214,6 +289,7 @@ export function ComposeEmailDialog({ open, onClose }: Props) {
       })
       const data = await res.json()
       if (!res.ok || !data.ok) throw new Error(data.error ?? 'Erro')
+      await deleteDraftIfAny()
       toast.success('Email enviado!')
       handleClose()
       router.refresh()
@@ -471,6 +547,18 @@ export function ComposeEmailDialog({ open, onClose }: Props) {
             style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--foreground)' }}
           >
             Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleSaveDraft}
+            disabled={savingDraft || sending}
+            className="gap-1.5"
+            style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--foreground)' }}
+          >
+            {savingDraft
+              ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> A guardar…</>
+              : <><Save className="h-3.5 w-3.5" /> {draftId ? 'Atualizar rascunho' : 'Guardar rascunho'}</>}
           </Button>
           <Button
             onClick={handleSend}

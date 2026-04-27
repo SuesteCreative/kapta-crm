@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Mail, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
-  ExternalLink, Paperclip, Reply, PenSquare,
+  ExternalLink, Paperclip, Reply, PenSquare, FileText, Trash2,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
@@ -50,6 +50,30 @@ interface ReplyContext {
   allEmails: EmailContact[]
 }
 
+interface DraftRow {
+  id: string
+  primary_customer_id: string | null
+  to_recipients: Array<{ email: string; name?: string }> | null
+  subject: string | null
+  body: string | null
+  prompt: string | null
+  updated_at: string
+}
+
+function draftLabel(d: DraftRow): string {
+  if (d.subject && d.subject.trim()) return d.subject.trim()
+  if (d.body && d.body.trim()) return d.body.trim().slice(0, 60) + (d.body.length > 60 ? '…' : '')
+  if (d.prompt && d.prompt.trim()) return `(prompt) ${d.prompt.trim().slice(0, 50)}${d.prompt.length > 50 ? '…' : ''}`
+  return '(rascunho vazio)'
+}
+
+function draftRecipients(d: DraftRow): string {
+  const list = d.to_recipients ?? []
+  if (list.length === 0) return 'sem destinatários'
+  if (list.length === 1) return list[0].email
+  return `${list[0].email} +${list.length - 1}`
+}
+
 const DIRECTION_FILTERS = [
   { key: null,       label: 'Todos' },
   { key: 'inbound',  label: 'Recebidos' },
@@ -93,6 +117,51 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [replyCtx, setReplyCtx]         = useState<ReplyContext | null>(null)
   const [replyLoading, setReplyLoading] = useState(false)
   const [composeOpen, setComposeOpen]   = useState(false)
+  const [composeDraftId, setComposeDraftId] = useState<string | null>(null)
+  const [drafts, setDrafts]             = useState<DraftRow[]>([])
+  const [draftsOpen, setDraftsOpen]     = useState(false)
+  const draftsRef                       = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    fetch('/api/email/drafts')
+      .then((r) => r.json())
+      .then((json) => { if (json.ok) setDrafts(json.drafts ?? []) })
+      .catch(() => { /* silent */ })
+  }, [composeOpen]) // refresh when compose dialog closes (in case a draft was saved or sent)
+
+  useEffect(() => {
+    if (!draftsOpen) return
+    function onClick(ev: MouseEvent) {
+      if (draftsRef.current && !draftsRef.current.contains(ev.target as Node)) {
+        setDraftsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [draftsOpen])
+
+  async function deleteDraft(id: string) {
+    try {
+      const res = await fetch(`/api/email/drafts/${id}`, { method: 'DELETE' })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error)
+      setDrafts((prev) => prev.filter((d) => d.id !== id))
+      toast.success('Rascunho apagado')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao apagar.')
+    }
+  }
+
+  function openDraft(id: string) {
+    setComposeDraftId(id)
+    setComposeOpen(true)
+    setDraftsOpen(false)
+  }
+
+  function openNewCompose() {
+    setComposeDraftId(null)
+    setComposeOpen(true)
+  }
 
   async function openReply(email: EmailRow) {
     const matched = email.metadata?.matched_email as string | undefined
@@ -193,9 +262,9 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
             {emails.length - dismissedIds.size} emails sincronizados
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 relative">
           <button
-            onClick={() => setComposeOpen(true)}
+            onClick={openNewCompose}
             className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-opacity hover:opacity-70"
             style={{
               background: 'var(--primary)',
@@ -206,6 +275,70 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
             <PenSquare className="h-3.5 w-3.5" />
             Novo email
           </button>
+
+          {drafts.length > 0 && (
+            <div ref={draftsRef} className="relative">
+              <button
+                onClick={() => setDraftsOpen((v) => !v)}
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-opacity hover:opacity-70"
+                style={{
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--foreground)',
+                }}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Rascunhos
+                <span
+                  className="rounded-full px-1.5 text-[10.5px] font-bold"
+                  style={{ background: 'rgba(91,91,214,0.15)', color: 'var(--primary)' }}
+                >
+                  {drafts.length}
+                </span>
+              </button>
+
+              {draftsOpen && (
+                <div
+                  className="absolute right-0 top-full mt-1 w-[340px] z-30 rounded-lg overflow-hidden"
+                  style={{
+                    background: 'var(--card)',
+                    border: '1px solid var(--border)',
+                    boxShadow: 'var(--shadow-card)',
+                    maxHeight: 360,
+                    overflowY: 'auto',
+                  }}
+                >
+                  {drafts.map((d) => (
+                    <div
+                      key={d.id}
+                      className="flex items-start gap-2 px-3 py-2 row-hover"
+                      style={{ borderBottom: '1px solid var(--border)' }}
+                    >
+                      <button
+                        onClick={() => openDraft(d.id)}
+                        className="flex-1 min-w-0 text-left"
+                      >
+                        <p className="text-[12.5px] font-medium truncate" style={{ color: 'var(--foreground)' }}>
+                          {draftLabel(d)}
+                        </p>
+                        <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--muted-foreground)' }}>
+                          {draftRecipients(d)} · {formatDateTime(d.updated_at)}
+                        </p>
+                      </button>
+                      <button
+                        onClick={(ev) => { ev.stopPropagation(); deleteDraft(d.id) }}
+                        className="opacity-50 hover:opacity-100 p-1 rounded shrink-0"
+                        title="Apagar rascunho"
+                      >
+                        <Trash2 className="h-3 w-3" style={{ color: 'var(--muted-foreground)' }} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             onClick={() => syncNow()}
             disabled={syncing}
@@ -525,7 +658,11 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
         />
       )}
 
-      <ComposeEmailDialog open={composeOpen} onClose={() => setComposeOpen(false)} />
+      <ComposeEmailDialog
+        open={composeOpen}
+        draftId={composeDraftId}
+        onClose={() => { setComposeOpen(false); setComposeDraftId(null) }}
+      />
     </div>
   )
 }
