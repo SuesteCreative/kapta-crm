@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 import { buildCustomerContext } from '@/lib/customer-context'
+import { stripHtml } from '@/lib/html-utils'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -57,17 +58,6 @@ Rules:
 - When a <customer_context> block is provided, factor open tickets, follow-ups, and recent meetings/WhatsApp into the reply. If the client's question relates to an open ticket, acknowledge it explicitly. Don't pretend the open issue doesn't exist.
 
 Return ONLY valid JSON, no markdown, no explanation.`
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&[a-z]+;/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
 
 type AttachmentMeta = { name: string; ai_summary?: string; mime?: string }
 

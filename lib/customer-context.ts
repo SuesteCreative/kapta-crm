@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase'
+import { stripHtml } from '@/lib/html-utils'
 
 type Ticket = { title: string; actual_behavior: string | null; priority: string; status: string }
 type FollowUp = { title: string; due_date: string | null; priority: string }
@@ -8,17 +9,6 @@ function truncate(s: string | null | undefined, n: number): string {
   if (!s) return ''
   const clean = s.replace(/\s+/g, ' ').trim()
   return clean.length > n ? clean.slice(0, n) + '…' : clean
-}
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&[a-z]+;/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
 }
 
 export async function buildCustomerContext(customerId: string, language: 'pt-PT' | 'en'): Promise<string | null> {

@@ -39,7 +39,8 @@ export function Sidebar() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Auto-sync on app open — but at most once every 10 minutes
+  // Auto-sync on app open and on navigation — but at most once every 10 minutes.
+  // The localStorage timestamp guard makes the extra route-change runs a no-op.
   useEffect(() => {
     if (pathname === '/login') return
     const INTERVAL_MS = 10 * 60 * 1000
@@ -48,7 +49,7 @@ export function Sidebar() {
       syncEmail(true)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [pathname])
 
   if (pathname === '/login') return null
 

@@ -148,9 +148,10 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
     toast.success(`Preset aplicado: ${p.name}`)
   }
 
-  // Apply initialState (for Reply All / Forward) when provided and no draft is loading
+  // Apply initialState (Reply All / Forward) only when there is no draft to load.
+  // Belt-and-suspenders: also bail while a draft fetch is in flight.
   useEffect(() => {
-    if (!open || initialDraftId || !initialState) return
+    if (!open || initialDraftId || loadingDraft || !initialState) return
     if (initialState.to)      setTo(initialState.to)
     if (initialState.cc)      setCc(initialState.cc)
     if (initialState.bcc)     setBcc(initialState.bcc)
@@ -158,7 +159,7 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
     if (initialState.body)    setBody(initialState.body)
     if (initialState.prompt)  setPrompt(initialState.prompt)
     if ((initialState.cc?.length ?? 0) + (initialState.bcc?.length ?? 0) > 0) setShowCcBcc(true)
-  }, [open, initialDraftId, initialState])
+  }, [open, initialDraftId, loadingDraft, initialState])
 
   async function handleSaveDraft() {
     if (to.length === 0 && !subject.trim() && !body.trim() && !prompt.trim()) {
@@ -199,9 +200,10 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
   async function deleteDraftIfAny() {
     if (!draftId) return
     try {
-      await fetch(`/api/email/drafts/${draftId}`, { method: 'DELETE' })
-    } catch {
-      // best-effort
+      const res = await fetch(`/api/email/drafts/${draftId}`, { method: 'DELETE' })
+      if (!res.ok) console.warn('Failed to delete draft after send:', res.status)
+    } catch (e) {
+      console.warn('Network error deleting draft after send:', e)
     }
   }
 

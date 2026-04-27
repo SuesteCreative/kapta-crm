@@ -29,6 +29,7 @@ import { OnboardingDialog } from '@/components/onboarding-dialog'
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { supabase } from '@/lib/supabase'
+import { stripHtml } from '@/lib/html-utils'
 import { toast } from 'sonner'
 import Link from 'next/link'
 
@@ -40,21 +41,6 @@ interface Props {
 }
 
 const TRUNCATE_LEN = 400
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&[a-z]+;/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
 
 type ThreadItem =
   | { kind: 'single'; i: Interaction }

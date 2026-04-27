@@ -38,10 +38,12 @@ export async function POST(req: NextRequest) {
       { auth: { persistSession: false } }
     )
 
-    let { data, error } = await anonClient.auth.signInWithPassword({
+    const signIn = await anonClient.auth.signInWithPassword({
       email: authEmail,
       password: supabasePassword,
     })
+    let data = signIn.data
+    const error = signIn.error
 
     // First-time setup: Supabase Auth user doesn't exist yet — create it
     if (error && (error.message.includes('Invalid login credentials') || error.status === 400)) {

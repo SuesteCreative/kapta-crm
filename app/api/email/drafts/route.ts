@@ -1,21 +1,23 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { requireAuth } from '@/lib/api-auth'
+import type { Recipient } from '@/components/recipient-picker'
+import type { UploadedAttachment } from '@/lib/upload-attachment'
 
 export const dynamic = 'force-dynamic'
 
 interface UpsertBody {
   id?: string
   primary_customer_id?: string | null
-  to_recipients?: unknown[]
-  cc_recipients?: unknown[]
-  bcc_recipients?: unknown[]
+  to_recipients?: Recipient[]
+  cc_recipients?: Recipient[]
+  bcc_recipients?: Recipient[]
   subject?: string
   body?: string
   prompt?: string
   language?: string
-  attachments?: unknown[]
-  inline_images?: unknown[]
+  attachments?: UploadedAttachment[]
+  inline_images?: UploadedAttachment[]
 }
 
 export async function GET(req: Request) {

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 import { requireAuth } from '@/lib/api-auth'
+import { stripHtml } from '@/lib/html-utils'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -25,17 +26,6 @@ Rules:
 - Priority: urgent=blocked/critical/today; high=financial/waiting days; medium=normal; low=informal.
 
 Return ONLY valid JSON. No markdown, no explanation.`
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&[a-z]+;/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
 
 interface SuggestRequest {
   customer_name: string

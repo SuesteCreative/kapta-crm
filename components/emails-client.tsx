@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
+import { stripHtml } from '@/lib/html-utils'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
@@ -136,25 +137,6 @@ const DIRECTION_FILTERS = [
   { key: 'inbound',  label: 'Recebidos' },
   { key: 'outbound', label: 'Enviados' },
 ]
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&[a-z]+;/gi, '')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-}
 
 function formatBytes(n?: number): string {
   if (!n) return ''

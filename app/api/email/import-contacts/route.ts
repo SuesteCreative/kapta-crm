@@ -29,7 +29,7 @@ const SKIP_PREFIXES = [
  */
 function domainToCompanyName(domain: string): string {
   // Remove known TLDs (handles .co.uk, .com.br, single TLDs)
-  let base = domain
+  const base = domain
     .replace(/\.(com|net|org|io|co|pt|eu|uk|us|br|de|fr|es|it|nl|be|ch|at|au|nz|ca|app|dev|ai|tech|digital|agency|studio|group|cloud)\b.*/i, '')
     .replace(/\.[a-z]{2,4}$/, '') // fallback: strip last segment
 

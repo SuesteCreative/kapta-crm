@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer'
 import { createServiceClient } from '@/lib/supabase'
+import { stripHtml } from '@/lib/html-utils'
 
 export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 
@@ -21,23 +22,6 @@ export interface SendInput {
 }
 
 const IMG_TOKEN = /\[img:(https?:\/\/[^\s\]]+)\]/g
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&[a-z]+;/gi, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-}
 
 function escapeAndBreak(text: string): string {
   return text
