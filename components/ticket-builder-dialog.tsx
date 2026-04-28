@@ -8,25 +8,70 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { TagInput } from '@/components/ui/tag-input'
 import { Copy, Check, Sparkles, Loader2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
-import type { CustomerWithIdentifiers, Interaction } from '@/lib/database.types'
+import {
+  PLATFORMS, INPUT_PLATFORMS, OUTPUT_PLATFORMS,
+  PLATFORM_LABELS, INPUT_PLATFORM_LABELS, OUTPUT_PLATFORM_LABELS,
+  type CustomerWithIdentifiers, type Interaction,
+  type Platform, type InputPlatform, type OutputPlatform,
+} from '@/lib/database.types'
+import { extractTicketHints } from '@/lib/extract-ticket-fields'
+import { stripHtml } from '@/lib/html-utils'
 
 interface Props {
   open: boolean
   customer: CustomerWithIdentifiers
   interactions?: Interaction[]
+  sourceInteractionId?: string | null
   onClose: () => void
 }
 
-function buildTicketText(form: Record<string, string>, customer: CustomerWithIdentifiers): string {
+interface FormState {
+  title: string
+  description: string
+  steps_to_reproduce: string
+  expected_behavior: string
+  actual_behavior: string
+  priority: string
+  status: string
+  tags: string
+  platform: '' | Platform
+  input_platform: '' | InputPlatform
+  output_platform: '' | OutputPlatform
+  account_number: string
+  references_list: string[]
+}
+
+const EMPTY_FORM: FormState = {
+  title: '', description: '', steps_to_reproduce: '', expected_behavior: '',
+  actual_behavior: '', priority: 'medium', status: 'open', tags: '',
+  platform: '', input_platform: '', output_platform: '',
+  account_number: '', references_list: [],
+}
+
+function buildTicketText(form: FormState, customer: CustomerWithIdentifiers): string {
+  const platformLine = form.platform ? PLATFORM_LABELS[form.platform] : '—'
+  const inputLine    = form.input_platform ? INPUT_PLATFORM_LABELS[form.input_platform] : '—'
+  const outputLine   = form.output_platform ? OUTPUT_PLATFORM_LABELS[form.output_platform] : '—'
+  const refsLine     = form.references_list.length > 0
+    ? form.references_list.map((r) => `\`${r}\``).join(', ')
+    : '—'
+
   return `# 🎫 Ticket — ${form.title}
 
 **Cliente:** ${customer.name}${customer.company ? ` (${customer.company})` : ''}
 **Plano:** ${customer.plan ?? 'N/A'}
 **Prioridade:** ${form.priority.toUpperCase()}
 **Estado:** ${form.status}
+
+**Plataforma:** ${platformLine}
+**Input:** ${inputLine}
+**Output:** ${outputLine}
+**Conta:** ${form.account_number || '—'}
+**Referências:** ${refsLine}
 
 ---
 
@@ -48,22 +93,30 @@ ${form.tags ? `## Tags\n${form.tags.split(',').map((t) => `\`${t.trim()}\``).joi
 *Gerado em ${new Date().toLocaleString('pt-PT')} via Kapta CRM*`
 }
 
-const EMPTY_FORM = {
-  title: '', description: '', steps_to_reproduce: '', expected_behavior: '',
-  actual_behavior: '', priority: 'medium', status: 'open', tags: '',
-}
-
-export function TicketBuilderDialog({ open, customer, interactions = [], onClose }: Props) {
+export function TicketBuilderDialog({ open, customer, interactions = [], sourceInteractionId = null, onClose }: Props) {
   const [loading, setLoading] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [form, setForm] = useState<FormState>(EMPTY_FORM)
 
-  // Auto-suggest when dialog opens and there are interactions
+  // Auto-suggest + regex prefill when dialog opens with interactions
   useEffect(() => {
     if (!open) return
     setForm(EMPTY_FORM)
     if (interactions.length === 0) return
+
+    // Regex prefill (synchronous, deterministic)
+    const bodies = interactions.slice(0, 3).map((i) => stripHtml(i.content ?? '')).join('\n\n')
+    const hints = extractTicketHints(bodies)
+
+    setForm((prev) => ({
+      ...prev,
+      platform: hints.platform ?? '',
+      input_platform: hints.input_platform ?? '',
+      output_platform: hints.output_platform ?? '',
+      account_number: hints.account_number ?? '',
+      references_list: hints.references ?? [],
+    }))
 
     async function suggest() {
       setSuggesting(true)
@@ -88,16 +141,17 @@ export function TicketBuilderDialog({ open, customer, interactions = [], onClose
         let json: { ok: boolean; title?: string; description?: string; steps_to_reproduce?: string | null; expected_behavior?: string | null; actual_behavior?: string | null; priority?: string; tags?: string[] }
         try { json = JSON.parse(text) } catch { return }
         if (!json.ok) return
-        setForm({
+        // AI owns prose; regex-derived structured fields preserved.
+        setForm((prev) => ({
+          ...prev,
           title: json.title ?? '',
           description: json.description ?? '',
           steps_to_reproduce: json.steps_to_reproduce ?? '',
           expected_behavior: json.expected_behavior ?? '',
           actual_behavior: json.actual_behavior ?? '',
           priority: json.priority ?? 'medium',
-          status: 'open',
           tags: (json.tags ?? []).join(', '),
-        })
+        }))
       } finally {
         setSuggesting(false)
       }
@@ -123,6 +177,12 @@ export function TicketBuilderDialog({ open, customer, interactions = [], onClose
         priority: form.priority as 'low' | 'medium' | 'high' | 'urgent',
         status: form.status as 'open' | 'in-progress' | 'resolved' | 'closed',
         tags: form.tags ? form.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+        platform: form.platform || null,
+        input_platform: form.input_platform || null,
+        output_platform: form.output_platform || null,
+        account_number: form.account_number.trim() || null,
+        references_list: form.references_list,
+        source_interaction_id: sourceInteractionId,
       })
       if (error) throw error
       toast.success('Ticket guardado!')
@@ -135,14 +195,17 @@ export function TicketBuilderDialog({ open, customer, interactions = [], onClose
   }
 
   async function handleCopy() {
+    if (!form.platform) { toast.error('Escolha a plataforma antes de copiar.'); return }
     await navigator.clipboard.writeText(ticketText)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
     toast.success('Ticket copiado!')
   }
 
-  const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+  const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm({ ...form, [k]: e.target.value })
+
+  const hasPrefill = !!(form.platform || form.input_platform || form.output_platform || form.account_number || form.references_list.length > 0)
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -158,6 +221,11 @@ export function TicketBuilderDialog({ open, customer, interactions = [], onClose
             {!suggesting && form.title && interactions.length > 0 && (
               <span className="flex items-center gap-1 text-[11px] font-normal rounded-full px-2 py-0.5" style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)' }}>
                 <Sparkles className="h-2.5 w-2.5" /> Preenchido por IA
+              </span>
+            )}
+            {!suggesting && hasPrefill && interactions.length > 0 && (
+              <span className="flex items-center gap-1 text-[11px] font-normal rounded-full px-2 py-0.5" style={{ background: 'rgba(45,185,117,0.1)', color: 'var(--status-active)' }}>
+                Detectado do email
               </span>
             )}
           </DialogTitle>
@@ -189,6 +257,75 @@ export function TicketBuilderDialog({ open, customer, interactions = [], onClose
                 disabled={suggesting}
               />
             </div>
+
+            {/* Platform mapping */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label>Plataforma *</Label>
+                <Select
+                  value={form.platform || undefined}
+                  onValueChange={(v) => setForm({ ...form, platform: v as Platform })}
+                >
+                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                  <SelectContent>
+                    {PLATFORMS.map((p) => (
+                      <SelectItem key={p} value={p}>{PLATFORM_LABELS[p]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Input</Label>
+                <Select
+                  value={form.input_platform || undefined}
+                  onValueChange={(v) => setForm({ ...form, input_platform: v as InputPlatform })}
+                >
+                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                  <SelectContent>
+                    {INPUT_PLATFORMS.map((p) => (
+                      <SelectItem key={p} value={p}>{INPUT_PLATFORM_LABELS[p]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Output</Label>
+                <Select
+                  value={form.output_platform || undefined}
+                  onValueChange={(v) => setForm({ ...form, output_platform: v as OutputPlatform })}
+                >
+                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                  <SelectContent>
+                    {OUTPUT_PLATFORMS.map((p) => (
+                      <SelectItem key={p} value={p}>{OUTPUT_PLATFORM_LABELS[p]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Account + References */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Nº de conta</Label>
+                <Input
+                  value={form.account_number}
+                  onChange={f('account_number')}
+                  placeholder="acct_xxx, ID do cliente…"
+                  disabled={suggesting}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Referências (Enter / vírgula)</Label>
+                <TagInput
+                  value={form.references_list}
+                  onChange={(refs) => setForm({ ...form, references_list: refs })}
+                  placeholder="pi_xxx, ch_xxx, EP123…"
+                  disabled={suggesting}
+                />
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <Label>Passos para reproduzir</Label>
               <Textarea

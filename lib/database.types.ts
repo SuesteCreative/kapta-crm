@@ -6,6 +6,36 @@ export type FollowUpStatus = 'open' | 'done' | 'snoozed'
 export type TicketStatus = 'open' | 'in-progress' | 'resolved' | 'closed'
 export type IdentifierType = 'email' | 'phone' | 'whatsapp' | 'slack_channel'
 
+export const PLATFORMS = ['rioko', 'stripe_app', 'konnector'] as const
+export const INPUT_PLATFORMS = ['stripe', 'fareharbor', 'shopify', 'easypay', 'eupago', 'outro'] as const
+export const OUTPUT_PLATFORMS = ['invoicexpress', 'moloni', 'vendus', 'billin', 'holded', 'sage', 'outro'] as const
+export type Platform = typeof PLATFORMS[number]
+export type InputPlatform = typeof INPUT_PLATFORMS[number]
+export type OutputPlatform = typeof OUTPUT_PLATFORMS[number]
+
+export const PLATFORM_LABELS: Record<Platform, string> = {
+  rioko: 'Rioko',
+  stripe_app: 'Stripe App',
+  konnector: 'Konnector',
+}
+export const INPUT_PLATFORM_LABELS: Record<InputPlatform, string> = {
+  stripe: 'Stripe',
+  fareharbor: 'FareHarbor',
+  shopify: 'Shopify',
+  easypay: 'Easypay',
+  eupago: 'Eupago',
+  outro: 'Outro',
+}
+export const OUTPUT_PLATFORM_LABELS: Record<OutputPlatform, string> = {
+  invoicexpress: 'InvoiceXpress',
+  moloni: 'Moloni',
+  vendus: 'Vendus',
+  billin: 'Billin',
+  holded: 'Holded',
+  sage: 'Sage',
+  outro: 'Outro',
+}
+
 export interface Company {
   id: string
   name: string
@@ -83,6 +113,12 @@ export interface Ticket {
   priority: Priority
   status: TicketStatus
   tags: string[]
+  platform: Platform | null
+  input_platform: InputPlatform | null
+  output_platform: OutputPlatform | null
+  account_number: string | null
+  references_list: string[]
+  source_interaction_id: string | null
   created_at: string
   updated_at: string
 }

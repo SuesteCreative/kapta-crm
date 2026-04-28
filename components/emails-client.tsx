@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Mail, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
   ExternalLink, Paperclip, Reply, ReplyAll, Forward, PenSquare, FileText, Trash2,
+  Ticket as TicketIcon, CalendarCheck, AlertTriangle, ChevronRight,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
@@ -15,8 +16,10 @@ import { SendEmailDialog, type EmailContact } from '@/components/send-email-dial
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
 import { EmailActionPanel } from '@/components/email-action-panel'
 import { ComposeEmailDialog, type ComposeInitialState } from '@/components/compose-email-dialog'
+import { TicketBuilderDialog } from '@/components/ticket-builder-dialog'
+import { FollowUpDialog } from '@/components/follow-up-dialog'
 import type { Recipient } from '@/components/recipient-picker'
-import type { Interaction, CustomerIdentifier } from '@/lib/database.types'
+import type { Interaction, CustomerIdentifier, CustomerWithIdentifiers } from '@/lib/database.types'
 
 const OWN_DOMAIN = 'kapta.pt'
 
@@ -132,11 +135,28 @@ function draftRecipients(d: DraftRow): string {
   return `${list[0].email} +${list.length - 1}`
 }
 
-const DIRECTION_FILTERS = [
-  { key: null,       label: 'Todos' },
-  { key: 'inbound',  label: 'Recebidos' },
-  { key: 'outbound', label: 'Enviados' },
+type InboxFilter = 'all' | 'needs_reply' | 'inbound' | 'outbound'
+
+const FILTER_DEFS: Array<{ key: InboxFilter; label: string }> = [
+  { key: 'all',         label: 'Todos' },
+  { key: 'needs_reply', label: 'Por responder' },
+  { key: 'inbound',     label: 'Recebidos' },
+  { key: 'outbound',    label: 'Enviados' },
 ]
+
+const FILTER_STORAGE_KEY = 'kapta:emails:filter'
+
+interface StaleThread {
+  id: string
+  customer_id: string
+  customer_name: string | null
+  customer_company: string | null
+  subject: string | null
+  occurred_at: string
+  direction: 'inbound' | 'outbound'
+  age_hours: number
+  reason: 'you_owe' | 'waiting_on_customer'
+}
 
 function formatBytes(n?: number): string {
   if (!n) return ''
@@ -148,9 +168,16 @@ function formatBytes(n?: number): string {
 export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const router = useRouter()
   const [search, setSearch]             = useState('')
-  const [dirFilter, setDirFilter]       = useState<string | null>(null)
+  const [filter, setFilter]             = useState<InboxFilter>('all')
   const [syncing, setSyncing]           = useState(false)
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
+  const [ticketOpen, setTicketOpen]     = useState(false)
+  const [ticketCtx, setTicketCtx]       = useState<{ customer: CustomerWithIdentifiers; interactions: Interaction[]; sourceId: string } | null>(null)
+  const [ticketLoading, setTicketLoading] = useState(false)
+  const [followUpOpen, setFollowUpOpen] = useState(false)
+  const [followUpCtx, setFollowUpCtx]   = useState<{ customer_id: string; customer_name: string; subject: string } | null>(null)
+  const [staleThreads, setStaleThreads] = useState<StaleThread[]>([])
+  const [staleDismissed, setStaleDismissed] = useState(false)
   const [selectedId, setSelectedId]     = useState<string | null>(null)
   const [replyOpen, setReplyOpen]       = useState(false)
   const [replyCtx, setReplyCtx]         = useState<ReplyContext | null>(null)
@@ -171,6 +198,67 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
       .then((json) => { if (json.ok) setDrafts(json.drafts ?? []) })
       .catch(() => { /* silent */ })
   }, [composeOpen]) // refresh when compose dialog closes (in case a draft was saved or sent)
+
+  // Restore filter + stale-banner-dismissed state from localStorage
+  useEffect(() => {
+    const f = localStorage.getItem(FILTER_STORAGE_KEY)
+    if (f === 'all' || f === 'needs_reply' || f === 'inbound' || f === 'outbound') setFilter(f)
+    const dismissedDay = localStorage.getItem('kapta:stale:dismissed')
+    if (dismissedDay === new Date().toISOString().slice(0, 10)) setStaleDismissed(true)
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(FILTER_STORAGE_KEY, filter)
+  }, [filter])
+
+  // Fetch stale threads on mount
+  useEffect(() => {
+    fetch('/api/inbox/stale-threads')
+      .then((r) => r.json())
+      .then((json) => { if (json.ok) setStaleThreads(json.threads ?? []) })
+      .catch(() => { /* silent */ })
+  }, [])
+
+  function dismissStaleBanner() {
+    setStaleDismissed(true)
+    localStorage.setItem('kapta:stale:dismissed', new Date().toISOString().slice(0, 10))
+  }
+
+  async function openTicket(email: EmailRow) {
+    setTicketLoading(true)
+    try {
+      const [interactionRes, customerRes] = await Promise.all([
+        supabase.from('interactions').select('*').eq('id', email.id).maybeSingle(),
+        supabase.from('customers').select('*, customer_identifiers(*)').eq('id', email.customer_id).maybeSingle(),
+      ])
+      if (!customerRes.data) { toast.error('Cliente não encontrado.'); return }
+      const interaction = (interactionRes.data ?? null) as Interaction | null
+      setTicketCtx({
+        customer: customerRes.data as CustomerWithIdentifiers,
+        interactions: interaction ? [interaction] : [],
+        sourceId: email.id,
+      })
+      setTicketOpen(true)
+    } catch {
+      toast.error('Erro ao carregar ticket.')
+    } finally {
+      setTicketLoading(false)
+    }
+  }
+
+  function openFollowUp(email: EmailRow) {
+    setFollowUpCtx({
+      customer_id: email.customer_id,
+      customer_name: email.customers?.name ?? '',
+      subject: email.subject ?? '',
+    })
+    setFollowUpOpen(true)
+  }
+
+  function selectStaleThread(t: StaleThread) {
+    setSelectedId(t.id)
+    dismissStaleBanner()
+  }
 
   useEffect(() => {
     if (!draftsOpen) return
@@ -325,16 +413,35 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
     }
   }
 
-  const filtered = emails.filter((e) => {
+  // Pre-compute "needs reply": inbound emails with no later outbound for the same customer.
+  const lastOutboundByCustomer = new Map<string, string>()
+  for (const e of emails) {
+    if (e.direction !== 'outbound') continue
+    const prev = lastOutboundByCustomer.get(e.customer_id)
+    if (!prev || e.occurred_at > prev) lastOutboundByCustomer.set(e.customer_id, e.occurred_at)
+  }
+  function needsReply(e: EmailRow): boolean {
+    if (e.direction !== 'inbound') return false
+    const lastOut = lastOutboundByCustomer.get(e.customer_id)
+    return !lastOut || lastOut < e.occurred_at
+  }
+
+  const baseVisible = emails.filter((e) => e.metadata?.is_spam !== true && !dismissedIds.has(e.id))
+  const needsReplyCount = baseVisible.filter(needsReply).length
+
+  const filtered = baseVisible.filter((e) => {
     const q = search.toLowerCase()
     const matchesSearch =
       !search ||
       (e.subject ?? '').toLowerCase().includes(q) ||
       (e.customers?.name ?? '').toLowerCase().includes(q) ||
       (e.customers?.company ?? '').toLowerCase().includes(q)
-    const matchesDir = !dirFilter || e.direction === dirFilter
-    const notSpam = e.metadata?.is_spam !== true
-    return matchesSearch && matchesDir && notSpam && !dismissedIds.has(e.id)
+    if (!matchesSearch) return false
+    if (filter === 'all')         return true
+    if (filter === 'inbound')     return e.direction === 'inbound'
+    if (filter === 'outbound')    return e.direction === 'outbound'
+    if (filter === 'needs_reply') return needsReply(e)
+    return true
   })
 
   const selected = selectedId ? filtered.find((e) => e.id === selectedId) ?? null : null
@@ -468,22 +575,92 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
         </div>
 
         <div className="flex gap-1.5">
-          {DIRECTION_FILTERS.map(({ key, label }) => (
-            <button
-              key={String(key)}
-              onClick={() => setDirFilter(key)}
-              className="rounded-full px-3 py-1 text-[12px] font-medium transition-all"
-              style={{
-                background: dirFilter === key ? 'var(--foreground)' : 'var(--card)',
-                color: dirFilter === key ? 'var(--card)' : 'var(--muted-foreground)',
-                border: `1px solid ${dirFilter === key ? 'var(--foreground)' : 'var(--border)'}`,
-              }}
-            >
-              {label}
-            </button>
-          ))}
+          {FILTER_DEFS.map(({ key, label }) => {
+            const active = filter === key
+            const showBadge = key === 'needs_reply' && needsReplyCount > 0
+            return (
+              <button
+                key={key}
+                onClick={() => setFilter(key)}
+                className="rounded-full px-3 py-1 text-[12px] font-medium transition-all flex items-center gap-1.5"
+                style={{
+                  background: active ? 'var(--foreground)' : 'var(--card)',
+                  color: active ? 'var(--card)' : 'var(--muted-foreground)',
+                  border: `1px solid ${active ? 'var(--foreground)' : 'var(--border)'}`,
+                }}
+              >
+                {label}
+                {showBadge && (
+                  <span
+                    className="rounded-full px-1.5 text-[10px] font-bold tabular-nums"
+                    style={{
+                      background: active ? 'var(--card)' : 'rgba(239,68,68,0.12)',
+                      color: active ? 'var(--foreground)' : 'rgb(220,38,38)',
+                    }}
+                  >
+                    {needsReplyCount}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
+
+      {/* Stale-thread banner */}
+      {!staleDismissed && staleThreads.length > 0 && (
+        <div
+          className="rounded-xl px-4 py-3"
+          style={{
+            background: 'rgba(245,158,11,0.06)',
+            border: '1px solid rgba(245,158,11,0.25)',
+          }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 text-[12px] font-medium" style={{ color: 'rgb(180,83,9)' }}>
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {staleThreads.length} {staleThreads.length === 1 ? 'thread parada' : 'threads paradas'}
+            </div>
+            <button
+              onClick={dismissStaleBanner}
+              className="text-[11px] hover:opacity-70"
+              style={{ color: 'var(--muted-foreground)' }}
+            >
+              Dispensar hoje
+            </button>
+          </div>
+          <div className="space-y-1">
+            {staleThreads.slice(0, 5).map((t) => (
+              <button
+                key={t.id}
+                onClick={() => selectStaleThread(t)}
+                className="w-full flex items-center justify-between gap-3 px-2 py-1.5 rounded-md text-left hover:bg-[rgba(245,158,11,0.08)]"
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span
+                    className="rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0"
+                    style={{
+                      background: t.reason === 'you_owe' ? 'rgba(239,68,68,0.12)' : 'rgba(91,91,214,0.12)',
+                      color: t.reason === 'you_owe' ? 'rgb(220,38,38)' : 'var(--primary)',
+                    }}
+                  >
+                    {t.reason === 'you_owe' ? 'Deves resposta' : 'À espera'}
+                  </span>
+                  <span className="text-[12px] truncate" style={{ color: 'var(--foreground)' }}>
+                    {t.customer_name ?? '—'}
+                    {t.customer_company && <span style={{ color: 'var(--muted-foreground)' }}> · {t.customer_company}</span>}
+                    <span style={{ color: 'var(--muted-foreground)' }}> · {t.subject ?? '(sem assunto)'}</span>
+                  </span>
+                </div>
+                <span className="text-[11px] tabular-nums shrink-0" style={{ color: 'var(--muted-foreground)' }}>
+                  {t.age_hours < 24 ? `${Math.floor(t.age_hours)}h` : `${Math.floor(t.age_hours / 24)}d`}
+                </span>
+                <ChevronRight className="h-3 w-3 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Split: list + preview */}
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,520px)_1fr] gap-5 items-start">
@@ -630,6 +807,27 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                       Responder
                     </button>
                     <button
+                      onClick={() => openTicket(selected)}
+                      disabled={ticketLoading}
+                      className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70 disabled:opacity-40"
+                      style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                      title="Criar ticket a partir deste email"
+                    >
+                      {ticketLoading
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <TicketIcon className="h-3 w-3" />}
+                      Ticket
+                    </button>
+                    <button
+                      onClick={() => openFollowUp(selected)}
+                      className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70"
+                      style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                      title="Criar follow-up"
+                    >
+                      <CalendarCheck className="h-3 w-3" />
+                      Follow-up
+                    </button>
+                    <button
                       onClick={() => openReplyAll(selected)}
                       className="rounded-md p-1.5 hover:bg-[var(--border)]"
                       title="Responder a todos"
@@ -767,6 +965,26 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
         initialState={composeInitial}
         onClose={() => { setComposeOpen(false); setComposeDraftId(null); setComposeInitial(null) }}
       />
+
+      {ticketCtx && (
+        <TicketBuilderDialog
+          open={ticketOpen}
+          customer={ticketCtx.customer}
+          interactions={ticketCtx.interactions}
+          sourceInteractionId={ticketCtx.sourceId}
+          onClose={() => { setTicketOpen(false); setTicketCtx(null) }}
+        />
+      )}
+
+      {followUpCtx && (
+        <FollowUpDialog
+          open={followUpOpen}
+          customerId={followUpCtx.customer_id}
+          customerName={followUpCtx.customer_name}
+          subject={followUpCtx.subject}
+          onClose={() => { setFollowUpOpen(false); setFollowUpCtx(null) }}
+        />
+      )}
     </div>
   )
 }

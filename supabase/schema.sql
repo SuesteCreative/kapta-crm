@@ -95,6 +95,13 @@ create table tickets (
   status               text not null default 'open'
                          check (status in ('open','in-progress','resolved','closed')),
   tags                 text[] default '{}',
+  -- Platform metadata
+  platform             text check (platform in ('rioko','stripe_app','konnector')),
+  input_platform       text check (input_platform in ('stripe','fareharbor','shopify','easypay','eupago','outro')),
+  output_platform      text check (output_platform in ('invoicexpress','moloni','vendus','billin','holded','sage','outro')),
+  account_number       text,
+  references_list      text[] default '{}',                    -- payment IDs, booking refs, etc.
+  source_interaction_id uuid references interactions(id) on delete set null,
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now()
 );
@@ -134,6 +141,8 @@ create index on interactions (customer_id, occurred_at desc);
 create index on follow_ups (customer_id, due_date);
 create index on follow_ups (status, due_date);
 create index on tickets (customer_id, created_at desc);
+create index on tickets (platform);
+create index on tickets (source_interaction_id);
 
 -- ============================================================
 -- updated_at trigger helper

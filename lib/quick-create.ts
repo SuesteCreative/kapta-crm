@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import type { Platform, InputPlatform, OutputPlatform } from '@/lib/database.types'
 
 export type Priority = 'low' | 'medium' | 'high' | 'urgent'
 
@@ -16,6 +17,12 @@ export interface CreateTicketInput {
   description?: string | null
   actual_behavior?: string | null
   priority?: Priority
+  platform?: Platform | null
+  input_platform?: InputPlatform | null
+  output_platform?: OutputPlatform | null
+  account_number?: string | null
+  references_list?: string[]
+  source_interaction_id?: string | null
 }
 
 export async function createFollowUp(input: CreateFollowUpInput): Promise<void> {
@@ -36,6 +43,12 @@ export async function createTicket(input: CreateTicketInput): Promise<void> {
     description: input.description ?? null,
     actual_behavior: input.actual_behavior ?? null,
     priority: input.priority ?? 'medium',
+    platform: input.platform ?? null,
+    input_platform: input.input_platform ?? null,
+    output_platform: input.output_platform ?? null,
+    account_number: input.account_number ?? null,
+    references_list: input.references_list ?? [],
+    source_interaction_id: input.source_interaction_id ?? null,
   })
   if (error) throw error
 }
