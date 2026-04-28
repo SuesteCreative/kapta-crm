@@ -57,6 +57,37 @@ function parseCommitments(raw: string): CommitmentResult[] | null {
     } catch { /* fall through */ }
   }
 
+  // Salvage: truncated array missing closing ]
+  // e.g. "[ {...}, {...}, {...truncated"
+  const openBracket = stripped.indexOf('[')
+  if (openBracket >= 0) {
+    const tail = stripped.slice(openBracket)
+    // Find last complete object: scan for top-level } before any unterminated structure
+    let depth = 0
+    let lastCompleteEnd = -1
+    let inString = false
+    let escape = false
+    for (let i = 0; i < tail.length; i++) {
+      const c = tail[i]
+      if (escape) { escape = false; continue }
+      if (c === '\\') { escape = true; continue }
+      if (c === '"') { inString = !inString; continue }
+      if (inString) continue
+      if (c === '{') depth++
+      else if (c === '}') {
+        depth--
+        if (depth === 0) lastCompleteEnd = i
+      }
+    }
+    if (lastCompleteEnd > 0) {
+      const candidate = tail.slice(0, lastCompleteEnd + 1) + ']'
+      try {
+        const parsed = JSON.parse(candidate)
+        if (Array.isArray(parsed)) return parsed as CommitmentResult[]
+      } catch { /* fall through */ }
+    }
+  }
+
   // Object with array property
   const objectMatch = stripped.match(/\{[\s\S]*\}/)
   if (objectMatch) {
@@ -162,7 +193,7 @@ export async function POST(req: Request) {
   try {
     message = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1500,
+      max_tokens: 8000,
       temperature: 0.2,
       system: [{ type: 'text', text: `${SYSTEM_PROMPT}${memorySystemBlock(memory)}`, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Find Pedro's commitments. Return ONLY a JSON array (or [] if none):\n\n${itemsText}` }],
@@ -176,8 +207,13 @@ export async function POST(req: Request) {
   const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
   const claudeResults = parseCommitments(rawText)
   if (claudeResults === null) {
-    console.error('Claude non-array response:', rawText.slice(0, 300))
-    return NextResponse.json({ ok: false, error: 'Claude returned unexpected format' }, { status: 500 })
+    console.error('Claude non-array response:', rawText.slice(0, 500))
+    const preview = rawText.slice(0, 160).replace(/\s+/g, ' ').trim() || '(empty)'
+    return NextResponse.json({
+      ok: false,
+      error: `Claude returned unexpected format. Preview: "${preview}"`,
+      raw_preview: preview,
+    }, { status: 500 })
   }
 
   // Enrich + skip duplicates
