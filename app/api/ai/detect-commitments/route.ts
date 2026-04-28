@@ -2,24 +2,26 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase'
 import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
+import { requireAuth } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const SYSTEM_PROMPT = `Find commitments Pedro made to clients (Kapta, Portuguese B2B).
+const SYSTEM_PROMPT = `Find Pedro's commitments to clients (Kapta, B2B PT).
 
 Commitment language: "vou enviar/verificar/ligar", "fico de", "envio amanhã", "ficou acordado", "Pedro ficou de", "I'll send/check/call/follow up", "we agreed".
-Meeting notes use 3rd person: "Pedro ficou de enviar…" — still a commitment.
+Meeting notes 3rd person: "Pedro ficou de enviar…" still counts.
 
-Return JSON array. Each item:
+Per item return:
 - customer_id: string
-- interaction_type: string (email/whatsapp/meeting/call/note)
-- commitment_text: string (PT, max 15 words)
-- suggested_title: string (PT, max 10 words, infinitive verb, e.g. "Enviar proposta atualizada")
+- interaction_type: "email"|"whatsapp"|"meeting"|"call"|"note"
+- commitment_text: PT, ≤15 words
+- suggested_title: PT, ≤10 words, infinitive verb (e.g. "Enviar proposta atualizada")
 - suggested_priority: "low"|"medium"|"high"|"urgent"
 
 Priority: urgent=deadline ≤2d or churn risk; high=this week or financial; medium=general; low=informal.
-Skip interactions with no clear commitment. JSON array only. No markdown.`
+
+Output: JSON array. If no commitments found, return [] (empty array). NEVER return prose, NEVER wrap in object, NEVER add markdown fences. ONLY a JSON array starting with [ and ending with ].`
 
 type CommitmentResult = {
   customer_id: string
@@ -29,12 +31,66 @@ type CommitmentResult = {
   suggested_priority: 'low' | 'medium' | 'high' | 'urgent'
 }
 
+/**
+ * Lenient parser for Claude responses. Accepts:
+ *   - clean JSON array: [{...}, {...}]
+ *   - markdown-fenced array: ```json\n[...]\n```
+ *   - object wrapping array: { "commitments": [...] } or { "results": [...] }
+ *   - prose with no commitments: "I found no commitments" -> treats as []
+ * Returns null only if the response is genuinely unparseable.
+ */
+function parseCommitments(raw: string): CommitmentResult[] | null {
+  if (!raw) return []
+
+  // Strip markdown code fences
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim()
+
+  // Direct array
+  const arrayMatch = stripped.match(/\[[\s\S]*\]/)
+  if (arrayMatch) {
+    try {
+      const parsed = JSON.parse(arrayMatch[0])
+      if (Array.isArray(parsed)) return parsed as CommitmentResult[]
+    } catch { /* fall through */ }
+  }
+
+  // Object with array property
+  const objectMatch = stripped.match(/\{[\s\S]*\}/)
+  if (objectMatch) {
+    try {
+      const parsed = JSON.parse(objectMatch[0]) as Record<string, unknown>
+      for (const key of ['commitments', 'results', 'items', 'data']) {
+        const v = parsed[key]
+        if (Array.isArray(v)) return v as CommitmentResult[]
+      }
+    } catch { /* fall through */ }
+  }
+
+  // Prose indicating no commitments
+  const lower = stripped.toLowerCase()
+  if (
+    lower.includes('no commitment') ||
+    lower.includes('nenhum compromisso') ||
+    lower.includes('sem compromisso') ||
+    stripped.length === 0
+  ) {
+    return []
+  }
+
+  return null
+}
+
 type CommitmentSuggestion = CommitmentResult & {
   customer_name: string
   customer_company: string | null
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  const denied = requireAuth(req)
+  if (denied) return denied
   const supabase = createServiceClient()
 
   // Fetch last 60 days across all relevant interaction types
@@ -105,10 +161,11 @@ export async function POST() {
   let message
   try {
     message = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1500,
+      temperature: 0.2,
       system: [{ type: 'text', text: `${SYSTEM_PROMPT}${memorySystemBlock(memory)}`, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: `Find Pedro's commitments:\n\n${itemsText}` }],
+      messages: [{ role: 'user', content: `Find Pedro's commitments. Return ONLY a JSON array (or [] if none):\n\n${itemsText}` }],
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -117,16 +174,10 @@ export async function POST() {
   }
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
-  const match = rawText.match(/\[[\s\S]*\]/)
-  if (!match) {
-    console.error('Claude non-JSON response:', rawText.slice(0, 200))
+  const claudeResults = parseCommitments(rawText)
+  if (claudeResults === null) {
+    console.error('Claude non-array response:', rawText.slice(0, 300))
     return NextResponse.json({ ok: false, error: 'Claude returned unexpected format' }, { status: 500 })
-  }
-  let claudeResults: CommitmentResult[] = []
-  try {
-    claudeResults = JSON.parse(match[0])
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Claude devolveu JSON inválido' }, { status: 500 })
   }
 
   // Enrich + skip duplicates
