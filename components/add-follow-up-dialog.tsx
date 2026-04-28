@@ -31,6 +31,7 @@ interface Props {
 export function AddFollowUpDialog({ open, customerId, customerName, customerCompany, interactions = [], onClose }: Props) {
   const [loading,     setLoading]     = useState(false)
   const [suggesting,  setSuggesting]  = useState(false)
+  const [adjustPrompt, setAdjustPrompt] = useState('')
   const [form, setForm] = useState({
     title: '', description: '', due_date: '', priority: 'medium' as 'low' | 'medium' | 'high' | 'urgent',
   })
@@ -40,6 +41,7 @@ export function AddFollowUpDialog({ open, customerId, customerName, customerComp
       toast.error('Sem interações para analisar.')
       return
     }
+    const refining = !!adjustPrompt.trim()
     setSuggesting(true)
     try {
       const res = await fetch('/api/ai/suggest-follow-up', {
@@ -49,6 +51,8 @@ export function AddFollowUpDialog({ open, customerId, customerName, customerComp
           customer_name: customerName ?? 'Cliente',
           customer_company: customerCompany ?? null,
           interactions,
+          user_prompt: adjustPrompt.trim() || undefined,
+          current: refining ? { title: form.title, description: form.description, priority: form.priority } : undefined,
         }),
       })
       const json = await res.json()
@@ -59,7 +63,7 @@ export function AddFollowUpDialog({ open, customerId, customerName, customerComp
         description: json.description ?? f.description,
         priority: json.priority ?? f.priority,
       }))
-      toast.success('Sugestão gerada — revê antes de criar.')
+      toast.success(refining ? 'Ajustado — revê antes de criar.' : 'Sugestão gerada — revê antes de criar.')
     } catch {
       toast.error('Erro ao gerar sugestão.')
     } finally {
@@ -96,19 +100,30 @@ export function AddFollowUpDialog({ open, customerId, customerName, customerComp
         <DialogHeader><DialogTitle>Novo follow-up</DialogTitle></DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
 
-          {/* AI suggest button — only if context is available */}
+          {/* AI suggest + adjust — only if context is available */}
           {interactions.length > 0 && (
-            <Button
-              type="button"
-              onClick={suggestWithAI}
-              disabled={suggesting}
-              className="w-full h-9 gap-2 rounded-lg text-[13px] font-medium"
-              style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)', border: '1px solid rgba(91,91,214,0.25)' }}
-            >
-              {suggesting
-                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> A gerar sugestão…</>
-                : <><Sparkles className="h-3.5 w-3.5" /> Gerar com IA</>}
-            </Button>
+            <div className="space-y-2">
+              <Textarea
+                rows={2}
+                value={adjustPrompt}
+                onChange={(e) => setAdjustPrompt(e.target.value)}
+                placeholder="(opcional) Instrução para a IA: ex. 'foca na fatura por pagar', 'mais urgente', 'incluir prazo de 3 dias'…"
+                className="text-[12.5px]"
+                style={{ background: 'rgba(91,91,214,0.04)', border: '1px solid rgba(91,91,214,0.2)' }}
+                disabled={suggesting}
+              />
+              <Button
+                type="button"
+                onClick={suggestWithAI}
+                disabled={suggesting}
+                className="w-full h-9 gap-2 rounded-lg text-[13px] font-medium"
+                style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)', border: '1px solid rgba(91,91,214,0.25)' }}
+              >
+                {suggesting
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> {adjustPrompt.trim() ? 'A ajustar…' : 'A gerar…'}</>
+                  : <><Sparkles className="h-3.5 w-3.5" /> {adjustPrompt.trim() ? 'Ajustar com IA' : 'Gerar com IA'}</>}
+              </Button>
+            </div>
           )}
 
           <div className="space-y-1.5">

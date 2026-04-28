@@ -16,26 +16,44 @@ Return JSON:
 Priority: urgent=blocked/critical/due today-tomorrow; high=pending days/financial/waiting; medium=natural next step; low=informal.
 JSON only. No markdown.`
 
+interface RequestBody {
+  customer_name: string
+  customer_company?: string | null
+  interactions: Array<{ type: string; direction: string | null; subject: string | null; content: string | null; occurred_at: string }>
+  user_prompt?: string
+  current?: { title?: string; description?: string; priority?: string }
+}
+
 export async function POST(req: Request) {
-  const { customer_name, customer_company, interactions } = await req.json()
+  const { customer_name, customer_company, interactions, user_prompt, current } = await req.json() as RequestBody
 
   if (!interactions?.length) {
     return NextResponse.json({ ok: false, error: 'Sem interações.' }, { status: 400 })
   }
 
   const recent = interactions.slice(0, 8)
-  const text = recent.map((i: { type: string; direction: string | null; subject: string | null; content: string | null; occurred_at: string }) => {
+  const text = recent.map((i) => {
     const dir = i.direction === 'inbound' ? '← cliente' : i.direction === 'outbound' ? '→ Pedro' : ''
     const content = i.content ? stripHtml(i.content).slice(0, 400) : '(sem conteúdo)'
     return `[${new Date(i.occurred_at).toLocaleDateString('pt-PT')} ${i.type} ${dir}] ${i.subject ? `${i.subject} — ` : ''}${content}`
   }).join('\n\n')
 
+  const refining = !!(user_prompt?.trim())
+
+  const currentBlock = refining && current && (current.title || current.description)
+    ? `\nVersão atual:\nTítulo: ${current.title ?? '—'}\nDescrição: ${current.description ?? '—'}\nPrioridade: ${current.priority ?? 'medium'}\n`
+    : ''
+
+  const instructionBlock = refining
+    ? `\nPedro pediu este ajuste: "${user_prompt!.trim()}"\nReescreve o follow-up respeitando esse pedido. Mantém JSON.`
+    : 'Qual o follow-up mais importante que Pedro deve criar?'
+
   const prompt = `Cliente: ${customer_name}${customer_company ? ` (${customer_company})` : ''}
 
 Interações recentes:
 ${text}
-
-Qual o follow-up mais importante que Pedro deve criar?`
+${currentBlock}
+${instructionBlock}`
 
   const memory = await getAiMemory()
 
