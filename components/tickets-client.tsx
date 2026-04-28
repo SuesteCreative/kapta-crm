@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Copy, Check, Sparkles, Loader2, Users, Mail, MessageCircle, X, ChevronDown, ChevronUp, Search } from 'lucide-react'
+import { Copy, Check, Sparkles, Loader2, Users, Mail, MessageCircle, X, ChevronDown, ChevronUp, Search, CheckCircle2 } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -491,11 +491,16 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
         {filtered.map((t) => {
           const ps = PRIORITY_STYLES[t.priority]
           const ss = TICKET_STATUS_STYLES[t.status]
+          const isDone = t.status === 'resolved' || t.status === 'closed'
           return (
             <div
               key={t.id}
-              className="rounded-xl p-5 space-y-3"
-              style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+              className="rounded-xl p-5 space-y-3 transition-colors"
+              style={{
+                background: isDone ? 'rgba(45,185,117,0.06)' : 'var(--card)',
+                boxShadow: 'var(--shadow-card)',
+                border: isDone ? '1px solid rgba(45,185,117,0.25)' : '1px solid transparent',
+              }}
             >
               {/* Top row */}
               <div className="flex items-start justify-between gap-3">
@@ -537,6 +542,27 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
                     </SelectContent>
                   </Select>
 
+                  {!isDone && (
+                    <button
+                      onClick={() => updateStatus(t.id, 'resolved')}
+                      className="h-7 px-2.5 flex items-center gap-1 rounded-lg text-[11.5px] font-medium transition-opacity hover:opacity-70"
+                      style={{ background: 'rgba(45,185,117,0.12)', color: '#1a9e6c' }}
+                      title="Marcar como resolvido"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Resolver
+                    </button>
+                  )}
+                  {isDone && (
+                    <button
+                      onClick={() => updateStatus(t.id, 'open')}
+                      className="h-7 px-2.5 flex items-center gap-1 rounded-lg text-[11.5px] font-medium transition-opacity hover:opacity-70"
+                      style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                      title="Reabrir"
+                    >
+                      Reabrir
+                    </button>
+                  )}
                   <button
                     onClick={() => sendToDevTeam(t)}
                     className="h-7 w-7 flex items-center justify-center rounded-lg transition-colors"

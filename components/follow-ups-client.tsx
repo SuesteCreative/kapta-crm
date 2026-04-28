@@ -754,9 +754,13 @@ function FollowUpItem({ f, onToggle }: { f: FollowUpWithCustomer; onToggle: (id:
   return (
     <div
       className="flex items-start gap-3 rounded-xl p-4 transition-all"
-      style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', opacity: done ? 0.5 : 1 }}
+      style={{
+        background: done ? 'rgba(45,185,117,0.08)' : 'var(--card)',
+        boxShadow: 'var(--shadow-card)',
+        border: done ? '1px solid rgba(45,185,117,0.3)' : '1px solid transparent',
+      }}
     >
-      <button onClick={() => onToggle(f.id, f.status)} className="mt-0.5 shrink-0">
+      <button onClick={() => onToggle(f.id, f.status)} className="mt-0.5 shrink-0" title={done ? 'Reabrir' : 'Marcar como concluído'}>
         {done
           ? <CheckCircle2 className="h-[18px] w-[18px]" style={{ color: '#2DB975' }} />
           : <Circle className="h-[18px] w-[18px] transition-colors" style={{ color: 'var(--border)' }}
@@ -765,7 +769,7 @@ function FollowUpItem({ f, onToggle }: { f: FollowUpWithCustomer; onToggle: (id:
             />}
       </button>
       <div className="flex-1 min-w-0">
-        <p className={cn('text-sm font-medium', done && 'line-through')} style={{ color: done ? 'var(--muted-foreground)' : 'var(--foreground)' }}>
+        <p className={cn('text-sm font-medium', done && 'line-through')} style={{ color: done ? '#1a9e6c' : 'var(--foreground)' }}>
           {f.title}
         </p>
         {f.description && (
