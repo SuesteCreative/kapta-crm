@@ -6,7 +6,7 @@ import {
   Mail, MessageSquare, Video,
   Plus, ExternalLink, Heart, Building2, Tag,
   CheckCircle2, Circle, Pencil, ArrowLeft, ClipboardPaste,
-  Sparkles, Loader2, ChevronDown, ChevronUp, RefreshCw, Trash2, Paperclip, GitMerge,
+  Sparkles, Loader2, ChevronDown, ChevronUp, RefreshCw, Trash2, Paperclip, GitMerge, Reply,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -131,6 +131,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
   const [showEditCustomer,      setShowEditCustomer]      = useState(false)
   const [showPasteConversation, setShowPasteConversation] = useState(false)
   const [showSendEmail,         setShowSendEmail]         = useState(false)
+  const [replySubject,          setReplySubject]          = useState<string | null>(null)
   const [showOnboarding,        setShowOnboarding]        = useState(false)
   const [bubblesUrl,            setBubblesUrl]            = useState<string | null>(null)
   // Per-interaction: expand + AI bullets
@@ -356,7 +357,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
           {/* Actions */}
           <div className="flex gap-2 flex-wrap justify-end shrink-0">
             <ActionBtn icon={Pencil}         label="Editar"          onClick={() => setShowEditCustomer(true)} />
-            <ActionBtn icon={Mail}           label="Enviar email"    onClick={() => setShowSendEmail(true)} />
+            <ActionBtn icon={Mail}           label="Enviar email"    onClick={() => { setReplySubject(null); setShowSendEmail(true) }} />
             <ActionBtn icon={ClipboardPaste} label="Colar conversa"  onClick={() => setShowPasteConversation(true)} />
             <ActionBtn icon={Plus}           label="Follow-up"       onClick={() => setShowAddFollowUp(true)} />
             <ActionBtn icon={Plus}           label="Interação"       onClick={() => setShowAddInteraction(true)} />
@@ -675,6 +676,21 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                                 {isSummarizing
                                   ? <><Loader2 className="h-3 w-3 animate-spin" /> A resumir…</>
                                   : <><Sparkles className="h-3 w-3" /> Resumir</>}
+                              </button>
+                            )}
+                            {isEmail && i.direction === 'inbound' && (
+                              <button
+                                onClick={() => {
+                                  const raw = i.subject ?? ''
+                                  const subj = /^re:/i.test(raw) ? raw : (raw ? `Re: ${raw}` : '')
+                                  setReplySubject(subj)
+                                  setShowSendEmail(true)
+                                }}
+                                className="flex items-center gap-1 text-[11px] font-medium transition-opacity hover:opacity-70"
+                                style={{ color: 'var(--primary)' }}
+                                title="Responder a este email"
+                              >
+                                <Reply className="h-3 w-3" /> Responder
                               </button>
                             )}
                           </div>
@@ -1025,7 +1041,8 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
         allEmails={customer.customer_identifiers
           .filter((i) => i.type === 'email')
           .map((i) => ({ label: customer.name, email: i.value }))}
-        onClose={() => { setShowSendEmail(false); refresh() }}
+        initialSubject={replySubject ?? undefined}
+        onClose={() => { setShowSendEmail(false); setReplySubject(null); refresh() }}
       />
       <BubblesVideoModal url={bubblesUrl} onClose={() => setBubblesUrl(null)} />
 
