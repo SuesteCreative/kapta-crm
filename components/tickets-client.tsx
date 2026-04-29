@@ -12,7 +12,7 @@ import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import { BulkEmailDialog } from '@/components/bulk-email-dialog'
 import { ResolutionEmailDialog } from '@/components/resolution-email-dialog'
-import type { Ticket } from '@/lib/database.types'
+import { PLATFORM_LABELS, INPUT_PLATFORM_LABELS, OUTPUT_PLATFORM_LABELS, type Ticket } from '@/lib/database.types'
 
 type CustomerIdentifier = { type: string; value: string; is_primary: boolean }
 type TicketWithCustomer = Ticket & {
@@ -57,12 +57,22 @@ const TICKET_STATUS_STYLES: Record<string, { bg: string; text: string }> = {
 
 
 function ticketToText(t: TicketWithCustomer): string {
+  const platformLines: string[] = []
+  if (t.platform)        platformLines.push(`**Plataforma:** ${PLATFORM_LABELS[t.platform]}`)
+  if (t.input_platform)  platformLines.push(`**Input:** ${INPUT_PLATFORM_LABELS[t.input_platform]}`)
+  if (t.output_platform) platformLines.push(`**Output:** ${OUTPUT_PLATFORM_LABELS[t.output_platform]}`)
+  if (t.account_number)  platformLines.push(`**Conta:** ${t.account_number}`)
+  if (t.references_list?.length) {
+    platformLines.push(`**Referências:** ${t.references_list.map((r) => `\`${r}\``).join(', ')}`)
+  }
+  const platformBlock = platformLines.length > 0 ? `\n${platformLines.join('\n')}\n` : ''
+
   return `# 🎫 ${t.title}
 
 **Cliente:** ${t.customers?.name ?? 'N/A'}${t.customers?.company ? ` (${t.customers.company})` : ''}
 **Prioridade:** ${t.priority.toUpperCase()}
 **Estado:** ${t.status}
-
+${platformBlock}
 ---
 
 ## Descrição
@@ -90,7 +100,14 @@ function ticketToWhatsApp(t: TicketWithCustomer): string {
     '',
     `*Cliente:* ${c?.name ?? 'N/A'}${c?.company ? ` (${c.company})` : ''}`,
   ]
-  if (c?.plan)   lines.push(`*Plataforma:* ${c.plan}`)
+  if (t.platform)        lines.push(`*Plataforma:* ${PLATFORM_LABELS[t.platform]}`)
+  else if (c?.plan)      lines.push(`*Plataforma:* ${c.plan}`)
+  if (t.input_platform)  lines.push(`*Input:* ${INPUT_PLATFORM_LABELS[t.input_platform]}`)
+  if (t.output_platform) lines.push(`*Output:* ${OUTPUT_PLATFORM_LABELS[t.output_platform]}`)
+  if (t.account_number)  lines.push(`*Conta:* ${t.account_number}`)
+  if (t.references_list?.length) {
+    lines.push(`*Referências:* ${t.references_list.join(', ')}`)
+  }
   if (c?.status) lines.push(`*Estado cliente:* ${c.status}`)
   lines.push(`*Estado ticket:* ${t.status}`)
   if (t.description) {
