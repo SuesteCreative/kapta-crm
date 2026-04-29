@@ -13,6 +13,31 @@ export type Platform = typeof PLATFORMS[number]
 export type InputPlatform = typeof INPUT_PLATFORMS[number]
 export type OutputPlatform = typeof OUTPUT_PLATFORMS[number]
 
+// Unified flat list (used by company integrations UI — single dropdown)
+export const ALL_PLATFORMS = [
+  'rioko', 'stripe_app', 'konnector',
+  'stripe', 'fareharbor', 'shopify', 'easypay', 'eupago',
+  'invoicexpress', 'moloni', 'vendus', 'billin', 'holded', 'sage',
+  'outro',
+] as const
+export const ALL_PLATFORM_LABELS: Record<string, string> = {
+  rioko: 'Rioko',
+  stripe_app: 'Stripe App',
+  konnector: 'Konnector',
+  stripe: 'Stripe',
+  fareharbor: 'FareHarbor',
+  shopify: 'Shopify',
+  easypay: 'Easypay',
+  eupago: 'Eupago',
+  invoicexpress: 'InvoiceXpress',
+  moloni: 'Moloni',
+  vendus: 'Vendus',
+  billin: 'Billin',
+  holded: 'Holded',
+  sage: 'Sage',
+  outro: 'Outro',
+}
+
 export const PLATFORM_LABELS: Record<Platform, string> = {
   rioko: 'Rioko',
   stripe_app: 'Stripe App',
@@ -54,9 +79,9 @@ export interface CompanyWithContacts extends Company {
 export interface CompanyIntegration {
   id: string
   company_id: string
-  platform: Platform
-  input_platform: InputPlatform | null
-  output_platform: OutputPlatform | null
+  platform: string             // any value from ALL_PLATFORMS (no DB check after simplify migration)
+  input_platform: InputPlatform | null   // legacy — unused by simplified UI
+  output_platform: OutputPlatform | null // legacy — unused by simplified UI
   account_number: string | null
   references_list: string[]
   notes: string | null
