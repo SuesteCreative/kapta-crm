@@ -72,6 +72,16 @@ type DraftRequest = {
 }
 
 export async function POST(req: Request) {
+  try {
+    return await handle(req)
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.message}${err.stack ? ` :: ${err.stack.split('\n').slice(1, 3).join(' | ')}` : ''}` : String(err)
+    console.error('draft-reply outer error:', msg)
+    return NextResponse.json({ ok: false, error: `Server error: ${msg.slice(0, 300)}` }, { status: 500 })
+  }
+}
+
+async function handle(req: Request) {
   const body = await req.json() as DraftRequest
   const { customer_id, customer_name, customer_company, interactions, language = 'pt-PT' } = body
 
@@ -79,7 +89,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'Sem interações para analisar.' }, { status: 400 })
   }
 
-  const customerContext = customer_id ? await buildCustomerContext(customer_id, language) : null
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json({ ok: false, error: 'ANTHROPIC_API_KEY missing on server' }, { status: 500 })
+  }
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return NextResponse.json({ ok: false, error: 'Supabase env missing on server' }, { status: 500 })
+  }
+
+  let customerContext: string | null = null
+  try {
+    customerContext = customer_id ? await buildCustomerContext(customer_id, language) : null
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('buildCustomerContext failed:', msg)
+    // Don't fail the whole request — drafting can proceed without customer context
+    customerContext = null
+  }
 
   // Build thread oldest → newest, max 6 emails
   const emailThread = interactions
@@ -107,7 +132,13 @@ ${text}`
   // Sign-off is appended by the send route as an HTML signature — do not include it in the body
   const signoffInstruction = `Do NOT include a sign-off or closing at the end of the body. End the email after the last sentence of content. The signature will be added automatically.`
 
-  const memory = await getAiMemory()
+  let memory: string | null = null
+  try {
+    memory = await getAiMemory()
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('getAiMemory failed:', msg)
+  }
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
