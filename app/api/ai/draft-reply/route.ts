@@ -161,7 +161,7 @@ ${text}`
   try {
     message = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: 2048,
       system: systemBlocks,
       messages: [{
         role: 'user',
@@ -174,11 +174,20 @@ ${text}`
     return NextResponse.json({ ok: false, error: `Claude error: ${msg}` }, { status: 500 })
   }
 
-  const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
+  // Find first text block — model may return thinking/other blocks before text
+  const textBlock = message.content?.find((b) => b.type === 'text')
+  const rawText = textBlock?.type === 'text' ? textBlock.text : ''
+  if (!rawText) {
+    console.error('Claude empty/non-text response. stop_reason=', message.stop_reason, 'content=', JSON.stringify(message.content).slice(0, 300))
+    return NextResponse.json({
+      ok: false,
+      error: `Claude empty response (stop_reason=${message.stop_reason ?? 'unknown'})`,
+    }, { status: 500 })
+  }
   const match = rawText.match(/\{[\s\S]*\}/)
   if (!match) {
     console.error('Claude non-JSON response:', rawText.slice(0, 200))
-    return NextResponse.json({ ok: false, error: 'Claude returned unexpected format' }, { status: 500 })
+    return NextResponse.json({ ok: false, error: `Claude returned unexpected format: ${rawText.slice(0, 120)}` }, { status: 500 })
   }
 
   try {
