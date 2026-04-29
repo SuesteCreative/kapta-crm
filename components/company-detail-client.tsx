@@ -51,32 +51,57 @@ interface Props {
   tickets: Ticket[]
 }
 
-// Pick-a-contact inline widget
+// Pick-a-contact inline widget — single (interaction/followup) or multi (email)
 function ContactPicker({
   customers,
   onPick,
   onCancel,
   label = 'Para qual contacto?',
+  multi = false,
 }: {
   customers: CustomerWithIdentifiers[]
-  onPick: (id: string) => void
+  onPick: (ids: string[]) => void
   onCancel: () => void
   label?: string
+  multi?: boolean
 }) {
-  if (customers.length === 1) { onPick(customers[0].id); return null }
+  const [selected, setSelected] = useState<string[]>([])
+  if (customers.length === 1 && !multi) { onPick([customers[0].id]); return null }
+  function toggle(id: string) {
+    if (!multi) { onPick([id]); return }
+    setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+  }
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <span className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>{label}</span>
-      {customers.map((c) => (
-        <button
-          key={c.id}
-          onClick={() => onPick(c.id)}
-          className="h-7 px-3 rounded-lg text-[12px] font-medium transition-opacity hover:opacity-80"
-          style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)', border: '1px solid rgba(91,91,214,0.2)' }}
-        >
-          {c.name}
-        </button>
-      ))}
+      {customers.map((c) => {
+        const isSelected = selected.includes(c.id)
+        return (
+          <button
+            key={c.id}
+            onClick={() => toggle(c.id)}
+            className="h-7 px-3 rounded-lg text-[12px] font-medium transition-opacity hover:opacity-80"
+            style={{
+              background: isSelected ? 'var(--primary)' : 'rgba(91,91,214,0.1)',
+              color: isSelected ? 'var(--primary-foreground)' : 'var(--primary)',
+              border: '1px solid rgba(91,91,214,0.25)',
+            }}
+          >
+            {isSelected ? '✓ ' : ''}{c.name}
+          </button>
+        )
+      })}
+      {multi && (
+        <>
+          <button
+            onClick={() => onPick(selected.length > 0 ? selected : customers.map((c) => c.id))}
+            className="h-7 px-3 rounded-lg text-[12px] font-medium transition-opacity hover:opacity-80"
+            style={{ background: 'var(--foreground)', color: 'var(--card)' }}
+          >
+            {selected.length === 0 ? 'Todos' : `Continuar (${selected.length})`}
+          </button>
+        </>
+      )}
       <button onClick={onCancel} className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>Cancelar</button>
     </div>
   )
@@ -89,7 +114,7 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
   const [showEdit,           setShowEdit]           = useState(false)
   const [addInteractionFor,  setAddInteractionFor]  = useState<string | null>(null)
   const [addFollowUpFor,     setAddFollowUpFor]     = useState<string | null>(null)
-  const [emailFor,           setEmailFor]           = useState<string | null>(null)
+  const [emailFor,           setEmailFor]           = useState<string[] | null>(null)
   const [picker,             setPicker]             = useState<'interaction' | 'followup' | 'email' | null>(null)
   const [aiSummary,          setAiSummary]          = useState<AISummary | null>(null)
   const [loadingSummary,     setLoadingSummary]     = useState(false)
@@ -177,7 +202,17 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
   }
 
   const urgencyStyle = aiSummary ? URGENCY_STYLES[aiSummary.urgency] : URGENCY_STYLES.normal
-  const selectedCustomer = emailFor ? customers.find((c) => c.id === emailFor) : null
+  const selectedCustomer = emailFor && emailFor.length > 0
+    ? customers.find((c) => c.id === emailFor[0]) ?? null
+    : null
+  const selectedEmails = emailFor
+    ? emailFor
+        .map((id) => primaryEmail(id))
+        .filter((e): e is string => !!e)
+    : []
+  const selectedNames = emailFor
+    ? emailFor.map((id) => customers.find((c) => c.id === id)?.name ?? '').filter(Boolean)
+    : []
 
   return (
     <div className="p-7 max-w-[1000px] mx-auto space-y-6 animate-fade-in">
@@ -305,10 +340,11 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
         {picker ? (
           <ContactPicker
             customers={customers}
-            onPick={(id) => {
-              if (picker === 'interaction') setAddInteractionFor(id)
-              if (picker === 'followup')    setAddFollowUpFor(id)
-              if (picker === 'email')       setEmailFor(id)
+            multi={picker === 'email'}
+            onPick={(ids) => {
+              if (picker === 'interaction') setAddInteractionFor(ids[0])
+              if (picker === 'followup')    setAddFollowUpFor(ids[0])
+              if (picker === 'email')       setEmailFor(ids)
               setPicker(null)
             }}
             onCancel={() => setPicker(null)}
@@ -325,7 +361,7 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
               style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
               <Plus className="h-3.5 w-3.5" /> Interação
             </Button>
-            <Button size="sm" onClick={() => customers.length === 1 ? setEmailFor(customers[0].id) : setPicker('email')}
+            <Button size="sm" onClick={() => customers.length === 1 ? setEmailFor([customers[0].id]) : setPicker('email')}
               variant="outline" className="h-8 gap-1.5 rounded-lg text-[12px] font-medium"
               style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
               <Mail className="h-3.5 w-3.5" /> Email
@@ -549,10 +585,11 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
       {emailFor && selectedCustomer && (
         <SendEmailDialog
           open
-          customerId={emailFor}
-          customerEmail={primaryEmail(emailFor)}
-          customerName={selectedCustomer.name}
+          customerId={selectedCustomer.id}
+          customerEmail={selectedEmails.join(', ')}
+          customerName={selectedNames.join(', ')}
           customerCompany={company.name}
+          interactions={interactions.filter((i) => emailFor.includes(i.customer_id))}
           allEmails={customers.flatMap((c) =>
             c.customer_identifiers
               .filter((i) => i.type === 'email')
