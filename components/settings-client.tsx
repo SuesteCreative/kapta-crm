@@ -2,10 +2,11 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
-import { Save, Eye, Code, Link2, Brain } from 'lucide-react'
+import { Save, Eye, Code, Link2, Brain, Calendar } from 'lucide-react'
 
 const DEFAULT_SIGNATURE_HTML = `<div style="font-family:Arial,Helvetica,sans-serif;color:#2d2d2d;font-size:13px;line-height:1.6;border-top:2px solid #c0272b;padding-top:14px;margin-top:8px;max-width:480px;">
 
@@ -46,16 +47,50 @@ const DEFAULT_AI_MEMORY = `## Integrações
 interface Props {
   initialSignature: string
   initialMemory: string
+  initialCalendly?: string
 }
 
-export function SettingsClient({ initialSignature, initialMemory }: Props) {
+export function SettingsClient({ initialSignature, initialMemory, initialCalendly = '' }: Props) {
   const [html, setHtml] = useState(initialSignature || DEFAULT_SIGNATURE_HTML)
   const [memory, setMemory] = useState(initialMemory || DEFAULT_AI_MEMORY)
+  const [calendly, setCalendly] = useState(initialCalendly)
   const [savingMemory, setSavingMemory] = useState(false)
+  const [savingCalendly, setSavingCalendly] = useState(false)
   const [saving, setSaving] = useState(false)
   const [mode, setMode] = useState<'preview' | 'code'>('preview')
   const [relinking, setRelinking] = useState(false)
   const [relinkPreview, setRelinkPreview] = useState<{ total: number; groups: number } | null>(null)
+
+  async function handleSaveCalendly() {
+    setSavingCalendly(true)
+    try {
+      const trimmed = calendly.trim()
+      const { data: existing } = await supabase
+        .from('templates')
+        .select('id')
+        .eq('name', '__calendly_url__')
+        .maybeSingle()
+
+      if (existing) {
+        const { error } = await supabase
+          .from('templates')
+          .update({ body: trimmed })
+          .eq('id', existing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from('templates')
+          .insert({ name: '__calendly_url__', type: 'note', subject: null, body: trimmed })
+        if (error) throw error
+      }
+      toast.success('Link Calendly guardado!')
+    } catch (e) {
+      toast.error('Erro ao guardar link.')
+      console.error(e)
+    } finally {
+      setSavingCalendly(false)
+    }
+  }
 
   async function handleSaveMemory() {
     setSavingMemory(true)
@@ -226,6 +261,43 @@ export function SettingsClient({ initialSignature, initialMemory }: Props) {
             {relinking ? 'A verificar…' : 'Verificar e corrigir'}
           </Button>
         )}
+      </div>
+
+      {/* Calendly card */}
+      <div
+        className="rounded-xl p-6 space-y-3"
+        style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+      >
+        <div className="flex items-start gap-2">
+          <Calendar className="h-4 w-4 mt-0.5" style={{ color: 'var(--primary)' }} />
+          <div>
+            <h2 className="text-[15px] font-semibold" style={{ color: 'var(--foreground)' }}>
+              Link Calendly
+            </h2>
+            <p className="text-[13px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+              URL da tua página Calendly. A IA usa este link sempre que precisa de propor agendamento — em vez de escrever placeholders como “[link Calendly]”.
+            </p>
+          </div>
+        </div>
+
+        <Input
+          type="url"
+          value={calendly}
+          onChange={(e) => setCalendly(e.target.value)}
+          placeholder="https://calendly.com/pedro-kapta/30min"
+          className="font-mono text-[13px]"
+          style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+        />
+
+        <Button
+          onClick={handleSaveCalendly}
+          disabled={savingCalendly}
+          className="gap-2 rounded-lg text-[13px] font-medium"
+          style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+        >
+          <Save className="h-3.5 w-3.5" />
+          {savingCalendly ? 'A guardar…' : 'Guardar link'}
+        </Button>
       </div>
 
       {/* AI Memory card */}
