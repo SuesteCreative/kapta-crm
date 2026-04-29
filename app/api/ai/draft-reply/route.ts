@@ -5,7 +5,7 @@ import { buildCustomerContext } from '@/lib/customer-context'
 import { stripHtml } from '@/lib/html-utils'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 30
+export const maxDuration = 60
 
 const SYSTEM_PROMPT_PT = `Write email reply for Pedro (Kapta, B2B account manager, PT).
 

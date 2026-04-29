@@ -212,7 +212,10 @@ export function SendEmailDialog({
       })
       const text = await res.text()
       let json: { ok: boolean; subject?: string; body?: string; error?: string }
-      try { json = JSON.parse(text) } catch { throw new Error('Servidor sem resposta.') }
+      try { json = JSON.parse(text) } catch {
+        const snippet = text.slice(0, 160).replace(/\s+/g, ' ').trim()
+        throw new Error(`HTTP ${res.status} sem JSON: ${snippet || '(vazio)'}`)
+      }
       if (!json.ok) throw new Error(json.error ?? 'Erro')
       if (json.subject) setSubject(json.subject)
       if (json.body) setBody(json.body)
@@ -235,7 +238,10 @@ export function SendEmailDialog({
       })
       const text = await res.text()
       let json: { ok: boolean; body?: string; error?: string }
-      try { json = JSON.parse(text) } catch { throw new Error('Servidor sem resposta.') }
+      try { json = JSON.parse(text) } catch {
+        const snippet = text.slice(0, 160).replace(/\s+/g, ' ').trim()
+        throw new Error(`HTTP ${res.status} sem JSON: ${snippet || '(vazio)'}`)
+      }
       if (!json.ok) throw new Error(json.error ?? 'Erro')
       if (json.body) { setBody(json.body); toast.success('Rascunho ajustado!') }
       setRefineInput('')
