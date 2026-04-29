@@ -10,6 +10,7 @@ interface BulkInteraction {
   content: string
   occurred_at: string
   subject?: string
+  metadata?: Record<string, unknown>
 }
 
 interface RequestBody {
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
     content: i.content || null,
     subject: i.subject || null,
     occurred_at: i.occurred_at,
+    metadata: i.metadata ?? null,
   }))
 
   const { error } = await supabase.from('interactions').insert(rows)
