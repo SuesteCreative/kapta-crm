@@ -918,15 +918,44 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                   <div className="p-3 space-y-2">
                     {messages.map((m) => {
                       const isOut = m.direction === 'outbound'
+                      const meta = m.metadata as Record<string, unknown> | null
+                      const attachments = (meta?.attachments as Array<{ name: string; mime: string; size: number; url: string | null; ai_summary?: string }> | undefined) ?? []
                       return (
                         <div key={m.id} className={`group flex flex-col gap-0.5 ${isOut ? 'items-end' : 'items-start'}`}>
                           <div
-                            className="max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap"
+                            className="max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap space-y-2"
                             style={isOut
                               ? { background: 'rgba(91,91,214,0.12)', color: 'var(--foreground)', borderBottomRightRadius: 4 }
                               : { background: 'rgba(45,185,117,0.1)', color: 'var(--foreground)', borderBottomLeftRadius: 4 }}
                           >
-                            {m.content}
+                            {m.content && <div>{m.content}</div>}
+                            {attachments.map((att, ai) => {
+                              const isImage = att.mime?.startsWith('image/')
+                              if (isImage && att.url) {
+                                return (
+                                  <a key={ai} href={att.url} target="_blank" rel="noopener noreferrer" title={att.ai_summary ?? att.name}>
+                                    <img src={att.url} alt={att.name} className="rounded-lg object-cover hover:opacity-90 cursor-pointer" style={{ maxWidth: 240, maxHeight: 180 }} />
+                                  </a>
+                                )
+                              }
+                              return (
+                                <a
+                                  key={ai}
+                                  href={att.url ?? undefined}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={att.ai_summary ?? att.name}
+                                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70"
+                                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)', textDecoration: 'none' }}
+                                >
+                                  <Paperclip className="h-3 w-3 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
+                                  <span className="max-w-[160px] truncate">{att.name}</span>
+                                  <span style={{ color: 'var(--muted-foreground)' }}>
+                                    {att.size > 0 ? `${(att.size / 1024).toFixed(0)} KB` : ''}
+                                  </span>
+                                </a>
+                              )
+                            })}
                           </div>
                           <div className={`flex items-center gap-1 px-1 ${isOut ? 'flex-row-reverse' : ''}`}>
                             <span className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>

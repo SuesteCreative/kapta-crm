@@ -162,7 +162,7 @@ export function PasteConversationDialog({ open, customerId, onClose }: Props) {
             interactions: [{
               type,
               direction: 'inbound' as Direction,
-              content: uploaded.ai_summary ?? `Ficheiro: ${uploaded.name}`,
+              content: `📎 ${uploaded.name}`,
               occurred_at: new Date().toISOString(),
               subject: uploaded.name,
               metadata: {
