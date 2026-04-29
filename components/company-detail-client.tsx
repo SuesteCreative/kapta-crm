@@ -8,9 +8,13 @@ import {
   Mail,
   Heart, Users, ExternalLink, Plus, Sparkles,
   Loader2, RefreshCw, MessageCircle, AlertTriangle,
-  CheckCircle2, Clock,
+  CheckCircle2, Clock, Zap, Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TagInput } from '@/components/ui/tag-input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EditCompanyDialog } from '@/components/edit-company-dialog'
 import { AddInteractionDialog } from '@/components/add-interaction-dialog'
@@ -18,8 +22,14 @@ import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
 import { SendEmailDialog } from '@/components/send-email-dialog'
 import { cn, STATUS_STYLES, STATUS_LABELS, healthColor, URGENCY_STYLES, formatDateTime, formatDate, dueDateLabel, PRIORITY_STYLES } from '@/lib/utils'
 import { CHANNEL_CONFIG } from '@/lib/channel-config'
+import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
-import type { Company, CustomerWithIdentifiers, Interaction, FollowUp, Ticket } from '@/lib/database.types'
+import {
+  PLATFORMS, INPUT_PLATFORMS, OUTPUT_PLATFORMS,
+  PLATFORM_LABELS, INPUT_PLATFORM_LABELS, OUTPUT_PLATFORM_LABELS,
+  type Company, type CustomerWithIdentifiers, type Interaction, type FollowUp, type Ticket,
+  type CompanyIntegration, type Platform, type InputPlatform, type OutputPlatform,
+} from '@/lib/database.types'
 
 function cleanContent(raw: string): string {
   return raw
@@ -49,6 +59,7 @@ interface Props {
   interactions: Interaction[]
   followUps: FollowUp[]
   tickets: Ticket[]
+  integrations: CompanyIntegration[]
 }
 
 // Pick-a-contact inline widget — single (interaction/followup) or multi (email)
@@ -107,7 +118,7 @@ function ContactPicker({
   )
 }
 
-export function CompanyDetailClient({ company, customers, interactions, followUps, tickets }: Props) {
+export function CompanyDetailClient({ company, customers, interactions, followUps, tickets, integrations }: Props) {
   const router = useRouter()
   const openFollowUps = followUps.length
   const openTickets = tickets.length
@@ -390,6 +401,9 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
           <TabsTrigger value="tickets" className="rounded-md text-[13px] px-4 py-1.5">
             Tickets ({openTickets})
           </TabsTrigger>
+          <TabsTrigger value="integrations" className="rounded-md text-[13px] px-4 py-1.5">
+            <Zap className="h-3.5 w-3.5 mr-1.5" /> Integrações ({integrations.length})
+          </TabsTrigger>
         </TabsList>
 
         {/* CONTACTS */}
@@ -561,6 +575,11 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
             )
           })}
         </TabsContent>
+
+        {/* INTEGRATIONS */}
+        <TabsContent value="integrations" className="mt-5 space-y-3">
+          <CompanyIntegrationsPanel companyId={company.id} integrations={integrations} onChange={() => router.refresh()} />
+        </TabsContent>
       </Tabs>
 
       {/* Dialogs */}
@@ -597,6 +616,212 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
           )}
           onClose={() => { setEmailFor(null); router.refresh() }}
         />
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// Company Integrations panel — list + add + remove
+// ============================================================
+function CompanyIntegrationsPanel({
+  companyId,
+  integrations,
+  onChange,
+}: {
+  companyId: string
+  integrations: CompanyIntegration[]
+  onChange: () => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [removingId, setRemovingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState<{
+    platform: '' | Platform
+    input_platform: '' | InputPlatform
+    output_platform: '' | OutputPlatform
+    account_number: string
+    references_list: string[]
+    notes: string
+  }>({
+    platform: '', input_platform: '', output_platform: '',
+    account_number: '', references_list: [], notes: '',
+  })
+
+  function resetDraft() {
+    setDraft({ platform: '', input_platform: '', output_platform: '', account_number: '', references_list: [], notes: '' })
+  }
+
+  async function handleAdd() {
+    if (!draft.platform) { toast.error('Plataforma obrigatória.'); return }
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('company_integrations').insert({
+        company_id: companyId,
+        platform: draft.platform,
+        input_platform: draft.input_platform || null,
+        output_platform: draft.output_platform || null,
+        account_number: draft.account_number.trim() || null,
+        references_list: draft.references_list,
+        notes: draft.notes.trim() || null,
+      })
+      if (error) throw error
+      toast.success('Integração adicionada.')
+      resetDraft()
+      setAdding(false)
+      onChange()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao guardar.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRemove(id: string) {
+    setRemovingId(id)
+    try {
+      const { error } = await supabase.from('company_integrations').delete().eq('id', id)
+      if (error) throw error
+      toast.success('Integração removida.')
+      onChange()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao remover.')
+    } finally {
+      setRemovingId(null)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* List */}
+      {integrations.length === 0 && !adding && (
+        <div className="rounded-xl p-8 text-center" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
+          <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>Sem integrações registadas. Adiciona a primeira.</p>
+        </div>
+      )}
+
+      {integrations.map((it) => (
+        <div
+          key={it.id}
+          className="rounded-xl p-4 space-y-2"
+          style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className="rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+                style={{ background: 'rgba(91,91,214,0.12)', color: 'var(--primary)' }}
+              >
+                {PLATFORM_LABELS[it.platform]}
+              </span>
+              {it.input_platform && (
+                <span className="text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
+                  Input: <span style={{ color: 'var(--foreground)' }}>{INPUT_PLATFORM_LABELS[it.input_platform]}</span>
+                </span>
+              )}
+              {it.output_platform && (
+                <span className="text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
+                  Output: <span style={{ color: 'var(--foreground)' }}>{OUTPUT_PLATFORM_LABELS[it.output_platform]}</span>
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => handleRemove(it.id)}
+              disabled={removingId === it.id}
+              className="opacity-50 hover:opacity-100 p-1 rounded transition-opacity"
+              title="Remover"
+            >
+              {removingId === it.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />}
+            </button>
+          </div>
+          {(it.account_number || it.references_list.length > 0 || it.notes) && (
+            <div className="text-[12px] space-y-1" style={{ color: 'var(--muted-foreground)' }}>
+              {it.account_number && (
+                <div>
+                  <span>Conta: </span>
+                  <span className="font-mono" style={{ color: 'var(--foreground)' }}>{it.account_number}</span>
+                </div>
+              )}
+              {it.references_list.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1">
+                  <span>Refs:</span>
+                  {it.references_list.map((r, ri) => (
+                    <span key={ri} className="rounded-md px-1.5 py-0.5 text-[11px] font-mono" style={{ background: 'var(--muted)', color: 'var(--foreground)' }}>
+                      {r}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {it.notes && <p style={{ color: 'var(--foreground)' }}>{it.notes}</p>}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Add form */}
+      {adding ? (
+        <div className="rounded-xl p-4 space-y-3" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: '1px solid rgba(91,91,214,0.25)' }}>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[12px]">Plataforma *</Label>
+              <Select value={draft.platform || undefined} onValueChange={(v) => setDraft({ ...draft, platform: v as Platform })}>
+                <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>
+                  {PLATFORMS.map((p) => <SelectItem key={p} value={p}>{PLATFORM_LABELS[p]}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[12px]">Input</Label>
+              <Select value={draft.input_platform || undefined} onValueChange={(v) => setDraft({ ...draft, input_platform: v as InputPlatform })}>
+                <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>
+                  {INPUT_PLATFORMS.map((p) => <SelectItem key={p} value={p}>{INPUT_PLATFORM_LABELS[p]}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[12px]">Output</Label>
+              <Select value={draft.output_platform || undefined} onValueChange={(v) => setDraft({ ...draft, output_platform: v as OutputPlatform })}>
+                <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>
+                  {OUTPUT_PLATFORMS.map((p) => <SelectItem key={p} value={p}>{OUTPUT_PLATFORM_LABELS[p]}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[12px]">Nº de conta</Label>
+              <Input value={draft.account_number} onChange={(e) => setDraft({ ...draft, account_number: e.target.value })} placeholder="acct_xxx, ID do cliente…" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[12px]">Referências (Enter / vírgula)</Label>
+              <TagInput
+                value={draft.references_list}
+                onChange={(refs) => setDraft({ ...draft, references_list: refs })}
+                placeholder="cus_xxx, FH-12345…"
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[12px]">Notas</Label>
+            <Input value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} placeholder="Detalhes específicos da configuração…" />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setAdding(false); resetDraft() }}>Cancelar</Button>
+            <Button size="sm" onClick={handleAdd} disabled={saving}>{saving ? 'A guardar…' : 'Guardar'}</Button>
+          </div>
+        </div>
+      ) : (
+        <Button
+          onClick={() => setAdding(true)}
+          variant="outline"
+          className="gap-2 rounded-lg text-[13px] font-medium w-full"
+          style={{ background: 'transparent', border: '1px dashed var(--border)', color: 'var(--muted-foreground)' }}
+        >
+          <Plus className="h-3.5 w-3.5" /> Adicionar integração
+        </Button>
       )}
     </div>
   )

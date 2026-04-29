@@ -51,6 +51,19 @@ export interface CompanyWithContacts extends Company {
   customers: CustomerWithIdentifiers[]
 }
 
+export interface CompanyIntegration {
+  id: string
+  company_id: string
+  platform: Platform
+  input_platform: InputPlatform | null
+  output_platform: OutputPlatform | null
+  account_number: string | null
+  references_list: string[]
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface Customer {
   id: string
   name: string
@@ -154,6 +167,7 @@ export type Database = {
       follow_ups: { Row: FollowUp; Insert: Omit<FollowUp, 'id' | 'created_at'>; Update: Partial<Omit<FollowUp, 'id'>> }
       tickets: { Row: Ticket; Insert: Omit<Ticket, 'id' | 'created_at' | 'updated_at'>; Update: Partial<Omit<Ticket, 'id'>> }
       templates: { Row: Template; Insert: Omit<Template, 'id' | 'created_at'>; Update: Partial<Omit<Template, 'id'>> }
+      company_integrations: { Row: CompanyIntegration; Insert: Omit<CompanyIntegration, 'id' | 'created_at' | 'updated_at'>; Update: Partial<Omit<CompanyIntegration, 'id'>> }
     }
   }
 }

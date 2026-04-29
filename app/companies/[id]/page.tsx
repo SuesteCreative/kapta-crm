@@ -21,7 +21,7 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
 
   const customerIds = (customers ?? []).map((c) => c.id)
 
-  const [{ data: interactions }, { data: followUps }, { data: tickets }] = await Promise.all([
+  const [{ data: interactions }, { data: followUps }, { data: tickets }, { data: integrations }] = await Promise.all([
     customerIds.length
       ? supabase.from('interactions').select('*').in('customer_id', customerIds).order('occurred_at', { ascending: false })
       : Promise.resolve({ data: [] }),
@@ -31,6 +31,7 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
     customerIds.length
       ? supabase.from('tickets').select('*').in('customer_id', customerIds).in('status', ['open', 'in-progress']).order('created_at', { ascending: false })
       : Promise.resolve({ data: [] }),
+    supabase.from('company_integrations').select('*').eq('company_id', id).order('created_at', { ascending: true }),
   ])
 
   return (
@@ -40,6 +41,7 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
       interactions={interactions ?? []}
       followUps={followUps ?? []}
       tickets={tickets ?? []}
+      integrations={integrations ?? []}
     />
   )
 }
