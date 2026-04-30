@@ -19,6 +19,7 @@ import { EditCompanyDialog } from '@/components/edit-company-dialog'
 import { AddInteractionDialog } from '@/components/add-interaction-dialog'
 import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
 import { SendEmailDialog } from '@/components/send-email-dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { cn, STATUS_STYLES, STATUS_LABELS, healthColor, URGENCY_STYLES, formatDateTime, formatDate, dueDateLabel, PRIORITY_STYLES } from '@/lib/utils'
 import { CHANNEL_CONFIG } from '@/lib/channel-config'
 import { supabase } from '@/lib/supabase'
@@ -121,6 +122,8 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
   const openFollowUps = followUps.length
   const openTickets = tickets.length
   const [showEdit,           setShowEdit]           = useState(false)
+  const [showDelete,         setShowDelete]         = useState(false)
+  const [deleting,           setDeleting]           = useState(false)
   const [addInteractionFor,  setAddInteractionFor]  = useState<string | null>(null)
   const [addFollowUpFor,     setAddFollowUpFor]     = useState<string | null>(null)
   const [emailFor,           setEmailFor]           = useState<string[] | null>(null)
@@ -161,6 +164,27 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
   const customerMap = Object.fromEntries(customers.map((c) => [c.id, c.name]))
 
   const [syncingEmails, setSyncingEmails] = useState(false)
+
+  async function deleteCompany() {
+    setDeleting(true)
+    try {
+      // Detach customers + remove integrations, then delete company
+      const [r1, r2] = await Promise.all([
+        supabase.from('customers').update({ company_id: null }).eq('company_id', company.id),
+        supabase.from('company_integrations').delete().eq('company_id', company.id),
+      ])
+      if (r1.error) throw r1.error
+      if (r2.error) throw r2.error
+      const { error } = await supabase.from('companies').delete().eq('id', company.id)
+      if (error) throw error
+      toast.success(`${company.name} eliminada.`)
+      router.push('/companies')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao eliminar empresa.')
+      setDeleting(false)
+      setShowDelete(false)
+    }
+  }
 
   async function syncEmails() {
     setSyncingEmails(true)
@@ -277,6 +301,14 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
               style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
               <Pencil className="h-3.5 w-3.5" /> Editar
             </Button>
+            <button
+              onClick={() => setShowDelete(true)}
+              title="Eliminar empresa"
+              className="h-8 w-8 flex items-center justify-center rounded-lg transition-opacity hover:opacity-70"
+              style={{ background: 'rgba(220,38,38,0.08)', color: 'rgb(220,38,38)', border: '1px solid rgba(220,38,38,0.2)' }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
         {company.notes && (
@@ -582,6 +614,24 @@ export function CompanyDetailClient({ company, customers, interactions, followUp
 
       {/* Dialogs */}
       <EditCompanyDialog open={showEdit} company={company} onClose={() => { setShowEdit(false); router.refresh() }} />
+
+      <Dialog open={showDelete} onOpenChange={(o) => !o && !deleting && setShowDelete(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Eliminar {company.name}?</DialogTitle>
+            <DialogDescription>
+              Os {customers.length} contacto{customers.length !== 1 ? 's' : ''} associado{customers.length !== 1 ? 's' : ''} ficarão sem empresa, mas não serão apagados.
+              As integrações desta empresa serão removidas. Ação irreversível.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDelete(false)} disabled={deleting}>Cancelar</Button>
+            <Button onClick={deleteCompany} disabled={deleting} className="bg-red-600 hover:bg-red-700 text-white">
+              {deleting ? 'A eliminar…' : 'Eliminar empresa'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {addInteractionFor && (
         <AddInteractionDialog open customerId={addInteractionFor}

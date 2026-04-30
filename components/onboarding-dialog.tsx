@@ -149,13 +149,38 @@ export function OnboardingDialog({ open, customerId, customerName, customerEmail
   const [step,     setStep]     = useState<'pick' | 'preview'>('pick')
   const [loading,  setLoading]  = useState(false)
   const [sendEmail, setSendEmail] = useState(true)
+  const [selectedSteps, setSelectedSteps] = useState<Set<number>>(() => {
+    const initial = ONBOARDING_TEMPLATES['stripe_moloni'].steps
+    return new Set(initial.map((_, i) => i))
+  })
 
   const template = ONBOARDING_TEMPLATES[type] ?? ONBOARDING_TEMPLATES['stripe_moloni']
 
+  function handleTypeChange(next: string) {
+    setType(next)
+    const t = ONBOARDING_TEMPLATES[next] ?? ONBOARDING_TEMPLATES['stripe_moloni']
+    setSelectedSteps(new Set(t.steps.map((_, i) => i)))
+  }
+
+  function toggleStep(idx: number) {
+    setSelectedSteps((prev) => {
+      const next = new Set(prev)
+      if (next.has(idx)) next.delete(idx); else next.add(idx)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    setSelectedSteps((prev) =>
+      prev.size === template.steps.length ? new Set() : new Set(template.steps.map((_, i) => i))
+    )
+  }
+
   function handleClose() {
     setStep('pick')
-    setType('shopify')
+    setType('stripe_moloni')
     setSendEmail(true)
+    setSelectedSteps(new Set(ONBOARDING_TEMPLATES['stripe_moloni'].steps.map((_, i) => i)))
     onClose()
   }
 
@@ -163,7 +188,8 @@ export function OnboardingDialog({ open, customerId, customerName, customerEmail
     setLoading(true)
     try {
       const today = new Date()
-      const followUps = template.steps.map((s) => {
+      const chosen = template.steps.filter((_, i) => selectedSteps.has(i))
+      const followUps = chosen.map((s) => {
         const due = new Date(today)
         due.setDate(due.getDate() + s.daysOffset)
         return {
@@ -176,8 +202,10 @@ export function OnboardingDialog({ open, customerId, customerName, customerEmail
         }
       })
 
-      const { error: fuErr } = await supabase.from('follow_ups').insert(followUps)
-      if (fuErr) throw fuErr
+      if (followUps.length > 0) {
+        const { error: fuErr } = await supabase.from('follow_ups').insert(followUps)
+        if (fuErr) throw fuErr
+      }
 
       if (sendEmail && customerEmail) {
         await fetch('/api/email/send', {
@@ -192,7 +220,7 @@ export function OnboardingDialog({ open, customerId, customerName, customerEmail
         })
       }
 
-      toast.success(`Onboarding iniciado — ${template.steps.length} follow-ups criados${sendEmail && customerEmail ? ' e email enviado' : ''}.`)
+      toast.success(`Onboarding iniciado — ${followUps.length} follow-up${followUps.length !== 1 ? 's' : ''} criado${followUps.length !== 1 ? 's' : ''}${sendEmail && customerEmail ? ' e email enviado' : ''}.`)
       handleClose()
     } catch {
       toast.error('Erro ao iniciar onboarding.')
@@ -217,7 +245,7 @@ export function OnboardingDialog({ open, customerId, customerName, customerEmail
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label>Tipo de integração</Label>
-              <Select value={type} onValueChange={setType}>
+              <Select value={type} onValueChange={handleTypeChange}>
                 <SelectTrigger style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
                   <SelectValue />
                 </SelectTrigger>
@@ -233,17 +261,45 @@ export function OnboardingDialog({ open, customerId, customerName, customerEmail
               className="rounded-lg p-3 space-y-1.5"
               style={{ background: 'var(--muted)' }}
             >
-              <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted-foreground)' }}>
-                {template.steps.length} follow-ups serão criados
-              </p>
-              {template.steps.map((s, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <span className="text-[11px] font-mono mt-0.5 shrink-0" style={{ color: 'var(--muted-foreground)' }}>
-                    +{s.daysOffset}d
-                  </span>
-                  <span className="text-[12px]" style={{ color: 'var(--foreground)' }}>{s.title}</span>
-                </div>
-              ))}
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted-foreground)' }}>
+                  {selectedSteps.size} de {template.steps.length} follow-ups serão criados
+                </p>
+                <button
+                  type="button"
+                  onClick={toggleAll}
+                  className="text-[11px] font-medium transition-opacity hover:opacity-70"
+                  style={{ color: 'var(--primary)' }}
+                >
+                  {selectedSteps.size === template.steps.length ? 'Desmarcar todos' : 'Marcar todos'}
+                </button>
+              </div>
+              {template.steps.map((s, i) => {
+                const checked = selectedSteps.has(i)
+                return (
+                  <label
+                    key={i}
+                    className="flex items-start gap-2 cursor-pointer rounded-md px-1 py-0.5 transition-opacity hover:opacity-80"
+                    style={{ opacity: checked ? 1 : 0.45 }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleStep(i)}
+                      className="mt-1 shrink-0"
+                    />
+                    <span className="text-[11px] font-mono mt-0.5 shrink-0" style={{ color: 'var(--muted-foreground)' }}>
+                      +{s.daysOffset}d
+                    </span>
+                    <span
+                      className="text-[12px]"
+                      style={{ color: 'var(--foreground)', textDecoration: checked ? 'none' : 'line-through' }}
+                    >
+                      {s.title}
+                    </span>
+                  </label>
+                )
+              })}
             </div>
 
             {customerEmail && (

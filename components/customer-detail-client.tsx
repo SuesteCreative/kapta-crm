@@ -7,16 +7,21 @@ import {
   Plus, ExternalLink, Heart, Building2, Tag,
   CheckCircle2, Circle, Pencil, ArrowLeft, ClipboardPaste,
   Sparkles, Loader2, ChevronDown, ChevronUp, RefreshCw, Trash2, Paperclip, GitMerge, Reply,
+  Copy, Check, MessageCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   cn, STATUS_STYLES, STATUS_LABELS, PRIORITY_STYLES,
-  healthColor, URGENCY_STYLES, formatDateTime, dueDateLabel,
+  healthColor, URGENCY_STYLES, formatDate, formatDateTime, dueDateLabel,
 } from '@/lib/utils'
 import { CHANNEL_CONFIG } from '@/lib/channel-config'
-import type { CustomerWithIdentifiers, Interaction, FollowUp, Ticket } from '@/lib/database.types'
+import {
+  PLATFORM_LABELS, INPUT_PLATFORM_LABELS, OUTPUT_PLATFORM_LABELS,
+  type CustomerWithIdentifiers, type Interaction, type FollowUp, type Ticket,
+} from '@/lib/database.types'
 import { AddInteractionDialog } from '@/components/add-interaction-dialog'
 import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
 import { TicketBuilderDialog } from '@/components/ticket-builder-dialog'
@@ -27,6 +32,7 @@ import { PasteConversationDialog } from '@/components/paste-conversation-dialog'
 import { SendEmailDialog } from '@/components/send-email-dialog'
 import { OnboardingDialog } from '@/components/onboarding-dialog'
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
+import { ResolutionEmailDialog } from '@/components/resolution-email-dialog'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { supabase } from '@/lib/supabase'
 import { stripHtml } from '@/lib/html-utils'
@@ -41,6 +47,71 @@ interface Props {
 }
 
 const TRUNCATE_LEN = 400
+
+const TICKET_STATUS_STYLES: Record<string, { bg: string; text: string }> = {
+  open:          { bg: 'rgba(229,72,77,0.1)',   text: '#C0272B' },
+  'in-progress': { bg: 'rgba(245,158,11,0.1)',  text: '#B45309' },
+  resolved:      { bg: 'rgba(45,185,117,0.1)',  text: '#1a9e6c' },
+  closed:        { bg: 'rgba(156,163,175,0.1)', text: '#6B7280' },
+}
+
+function ticketToWhatsAppText(t: Ticket, customer: CustomerWithIdentifiers): string {
+  const lines: string[] = [
+    `*[${t.priority.toUpperCase()}] ${t.title}*`,
+    '',
+    `*Cliente:* ${customer.name}${customer.company ? ` (${customer.company})` : ''}`,
+  ]
+  if (t.platform)        lines.push(`*Plataforma:* ${PLATFORM_LABELS[t.platform]}`)
+  else if (customer.plan) lines.push(`*Plataforma:* ${customer.plan}`)
+  if (t.input_platform)  lines.push(`*Input:* ${INPUT_PLATFORM_LABELS[t.input_platform]}`)
+  if (t.output_platform) lines.push(`*Output:* ${OUTPUT_PLATFORM_LABELS[t.output_platform]}`)
+  if (t.account_number)  lines.push(`*Conta:* ${t.account_number}`)
+  if (t.references_list?.length) lines.push(`*Referências:* ${t.references_list.join(', ')}`)
+  lines.push(`*Estado ticket:* ${t.status}`)
+  if (t.description)        lines.push('', `*Descrição:*`, t.description)
+  if (t.steps_to_reproduce) lines.push('', `*Passos para reproduzir:*`, t.steps_to_reproduce)
+  if (t.actual_behavior)    lines.push('', `*Comportamento atual:*`, t.actual_behavior)
+  if (t.expected_behavior)  lines.push('', `*Comportamento esperado:*`, t.expected_behavior)
+  if (t.tags.length > 0)    lines.push('', `*Tags:* ${t.tags.join(', ')}`)
+  lines.push('', `_Kapta CRM · ${formatDate(t.created_at)}_`)
+  return lines.join('\n')
+}
+
+function ticketToMarkdown(t: Ticket, customer: CustomerWithIdentifiers): string {
+  const platformLines: string[] = []
+  if (t.platform)        platformLines.push(`**Plataforma:** ${PLATFORM_LABELS[t.platform]}`)
+  if (t.input_platform)  platformLines.push(`**Input:** ${INPUT_PLATFORM_LABELS[t.input_platform]}`)
+  if (t.output_platform) platformLines.push(`**Output:** ${OUTPUT_PLATFORM_LABELS[t.output_platform]}`)
+  if (t.account_number)  platformLines.push(`**Conta:** ${t.account_number}`)
+  if (t.references_list?.length) {
+    platformLines.push(`**Referências:** ${t.references_list.map((r) => `\`${r}\``).join(', ')}`)
+  }
+  const platformBlock = platformLines.length > 0 ? `\n${platformLines.join('\n')}\n` : ''
+  return `# 🎫 ${t.title}
+
+**Cliente:** ${customer.name}${customer.company ? ` (${customer.company})` : ''}
+**Prioridade:** ${t.priority.toUpperCase()}
+**Estado:** ${t.status}
+${platformBlock}
+---
+
+## Descrição
+${t.description ?? '—'}
+
+## Passos para reproduzir
+${t.steps_to_reproduce ?? '—'}
+
+## Comportamento esperado
+${t.expected_behavior ?? '—'}
+
+## Comportamento atual
+${t.actual_behavior ?? '—'}
+
+${t.tags.length ? `## Tags\n${t.tags.map((tag) => `\`${tag}\``).join(' ')}` : ''}
+
+---
+*${formatDate(t.created_at)} — Kapta CRM*`
+}
 
 type ThreadItem =
   | { kind: 'single'; i: Interaction }
@@ -187,6 +258,59 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
   const [deletingCustomer,   setDeletingCustomer]   = useState(false)
   const [showMerge,          setShowMerge]          = useState(false)
 
+  const [copiedTicketId,     setCopiedTicketId]     = useState<string | null>(null)
+  const [resolutionTicket,   setResolutionTicket]   = useState<{ ticket: Ticket; newStatus: string } | null>(null)
+  const [deletingTicketId,   setDeletingTicketId]   = useState<string | null>(null)
+  const [deletingFollowUpId, setDeletingFollowUpId] = useState<string | null>(null)
+
+  const customerEmail = customer.customer_identifiers.find((i) => i.type === 'email')?.value ?? null
+
+  async function updateTicketStatus(id: string, status: string) {
+    if (status === 'resolved' || status === 'closed') {
+      const t = tickets.find((x) => x.id === id)
+      if (t) { setResolutionTicket({ ticket: t, newStatus: status }); return }
+    }
+    const { error } = await supabase.from('tickets').update({ status }).eq('id', id)
+    if (error) { toast.error('Erro ao atualizar.'); return }
+    refresh()
+  }
+
+  async function commitTicketStatus(id: string, status: string) {
+    await supabase.from('tickets').update({ status }).eq('id', id)
+    setResolutionTicket(null)
+    refresh()
+  }
+
+  async function copyTicket(t: Ticket) {
+    await navigator.clipboard.writeText(ticketToMarkdown(t, customer))
+    setCopiedTicketId(t.id)
+    setTimeout(() => setCopiedTicketId(null), 2000)
+    toast.success('Ticket copiado!')
+  }
+
+  async function sendTicketToDev(t: Ticket) {
+    await navigator.clipboard.writeText(ticketToWhatsAppText(t, customer))
+    toast.success('Mensagem copiada — cola no grupo Kapta Dev Ops 💬')
+  }
+
+  async function deleteTicket(id: string) {
+    setDeletingTicketId(id)
+    const { error } = await supabase.from('tickets').delete().eq('id', id)
+    if (error) { toast.error('Erro ao apagar ticket.'); setDeletingTicketId(null); return }
+    toast.success('Ticket apagado.')
+    setDeletingTicketId(null)
+    refresh()
+  }
+
+  async function deleteFollowUp(id: string) {
+    setDeletingFollowUpId(id)
+    const { error } = await supabase.from('follow_ups').delete().eq('id', id)
+    if (error) { toast.error('Erro ao apagar follow-up.'); setDeletingFollowUpId(null); return }
+    toast.success('Follow-up apagado.')
+    setDeletingFollowUpId(null)
+    refresh()
+  }
+
   async function deleteCustomer() {
     setDeletingCustomer(true)
     try {
@@ -302,11 +426,11 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
         className="rounded-xl p-6"
         style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
       >
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
           {/* Identity */}
           <div className="space-y-2 flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-xl font-semibold" style={{ color: 'var(--foreground)' }}>
+              <h1 className="text-xl font-semibold break-words" style={{ color: 'var(--foreground)' }}>
                 {customer.name}
               </h1>
               <span
@@ -355,7 +479,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
           </div>
 
           {/* Actions */}
-          <div className="flex gap-2 flex-wrap justify-end shrink-0">
+          <div className="flex gap-2 flex-wrap lg:justify-end w-full lg:w-auto lg:shrink-0 lg:max-w-[60%]">
             <ActionBtn icon={Pencil}         label="Editar"          onClick={() => setShowEditCustomer(true)} />
             <ActionBtn icon={Mail}           label="Enviar email"    onClick={() => { setReplySubject(null); setShowSendEmail(true) }} />
             <ActionBtn icon={ClipboardPaste} label="Colar conversa"  onClick={() => setShowPasteConversation(true)} />
@@ -987,7 +1111,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
             <EmptyState message="Sem follow-ups. Cria o primeiro." />
           )}
           {openFollowUps.map((f) => (
-            <FollowUpRow key={f.id} f={f} onToggle={toggleFollowUp} />
+            <FollowUpRow key={f.id} f={f} onToggle={toggleFollowUp} onDelete={deleteFollowUp} deleting={deletingFollowUpId === f.id} />
           ))}
           {doneFollowUps.length > 0 && (
             <>
@@ -996,7 +1120,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                 Concluídos
               </p>
               {doneFollowUps.map((f) => (
-                <FollowUpRow key={f.id} f={f} onToggle={toggleFollowUp} />
+                <FollowUpRow key={f.id} f={f} onToggle={toggleFollowUp} onDelete={deleteFollowUp} deleting={deletingFollowUpId === f.id} />
               ))}
             </>
           )}
@@ -1007,33 +1131,121 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
           {tickets.length === 0 && <EmptyState message="Sem tickets." />}
           {tickets.map((t) => {
             const ps = PRIORITY_STYLES[t.priority]
+            const ss = TICKET_STATUS_STYLES[t.status]
+            const isDone = t.status === 'resolved' || t.status === 'closed'
             return (
               <div
                 key={t.id}
-                className="rounded-xl p-4 space-y-2"
-                style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+                className="rounded-xl p-4 space-y-3"
+                style={{
+                  background: isDone ? 'rgba(45,185,117,0.06)' : 'var(--card)',
+                  boxShadow: 'var(--shadow-card)',
+                  border: isDone ? '1px solid rgba(45,185,117,0.25)' : '1px solid transparent',
+                }}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <p className="font-medium text-sm" style={{ color: 'var(--foreground)' }}>
+                  <p className="font-medium text-sm flex-1 min-w-0" style={{ color: 'var(--foreground)' }}>
                     {t.title}
                   </p>
-                  <div className="flex gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                     <span
                       className="text-[11px] font-medium rounded-full px-2 py-0.5"
                       style={{ background: ps.bg, color: ps.text }}
                     >
                       {t.priority}
                     </span>
-                    <span
-                      className="text-[11px] font-medium rounded-full px-2 py-0.5"
-                      style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                    <Select value={t.status} onValueChange={(v) => updateTicketStatus(t.id, v)}>
+                      <SelectTrigger
+                        className="h-7 text-[11.5px] w-32 rounded-full border-0 font-medium px-3"
+                        style={{ background: ss.bg, color: ss.text }}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="open">Aberto</SelectItem>
+                        <SelectItem value="in-progress">Em progresso</SelectItem>
+                        <SelectItem value="resolved">Resolvido</SelectItem>
+                        <SelectItem value="closed">Fechado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!isDone && (
+                      <button
+                        onClick={() => updateTicketStatus(t.id, 'resolved')}
+                        className="h-7 px-2.5 flex items-center gap-1 rounded-lg text-[11.5px] font-medium transition-opacity hover:opacity-70"
+                        style={{ background: 'rgba(45,185,117,0.12)', color: '#1a9e6c' }}
+                        title="Marcar como resolvido"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Resolver
+                      </button>
+                    )}
+                    {isDone && (
+                      <button
+                        onClick={() => updateTicketStatus(t.id, 'open')}
+                        className="h-7 px-2.5 flex items-center gap-1 rounded-lg text-[11.5px] font-medium transition-opacity hover:opacity-70"
+                        style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                        title="Reabrir"
+                      >
+                        Reabrir
+                      </button>
+                    )}
+                    <button
+                      onClick={() => sendTicketToDev(t)}
+                      className="h-7 w-7 flex items-center justify-center rounded-lg transition-colors"
+                      style={{ background: 'rgba(37,211,102,0.12)', color: '#25D366' }}
+                      title="Enviar ao Dev Team (WhatsApp)"
                     >
-                      {t.status}
-                    </span>
+                      <MessageCircle className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => copyTicket(t)}
+                      className="h-7 w-7 flex items-center justify-center rounded-lg transition-colors"
+                      style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                      title="Copiar ticket"
+                    >
+                      {copiedTicketId === t.id
+                        ? <Check className="h-3.5 w-3.5" style={{ color: '#2DB975' }} />
+                        : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                    <button
+                      onClick={() => deleteTicket(t.id)}
+                      disabled={deletingTicketId === t.id}
+                      className="h-7 w-7 flex items-center justify-center rounded-lg transition-colors hover:opacity-70 disabled:opacity-40"
+                      style={{ background: 'rgba(220,38,38,0.08)', color: 'rgb(220,38,38)' }}
+                      title="Apagar ticket"
+                    >
+                      {deletingTicketId === t.id
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
                   </div>
                 </div>
                 {t.description && (
-                  <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>{t.description}</p>
+                  <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--muted-foreground)' }}>{t.description}</p>
+                )}
+                {(t.steps_to_reproduce || t.actual_behavior) && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {t.steps_to_reproduce && (
+                      <div className="rounded-lg p-3 text-xs space-y-1" style={{ background: 'var(--muted)' }}>
+                        <p className="font-semibold uppercase tracking-wide text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
+                          Passos
+                        </p>
+                        <p className="whitespace-pre-wrap" style={{ color: 'var(--foreground)' }}>
+                          {t.steps_to_reproduce}
+                        </p>
+                      </div>
+                    )}
+                    {t.actual_behavior && (
+                      <div className="rounded-lg p-3 text-xs space-y-1" style={{ background: 'var(--muted)' }}>
+                        <p className="font-semibold uppercase tracking-wide text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
+                          Comportamento atual
+                        </p>
+                        <p className="whitespace-pre-wrap" style={{ color: 'var(--foreground)' }}>
+                          {t.actual_behavior}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 )}
                 {t.tags.length > 0 && (
                   <div className="flex gap-1 flex-wrap">
@@ -1106,17 +1318,43 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
         onClose={() => { setShowOnboarding(false); refresh() }}
       />
       <MergeCustomerDialog open={showMerge} customer={customer} onClose={() => setShowMerge(false)} />
+
+      {resolutionTicket && (
+        <ResolutionEmailDialog
+          open={!!resolutionTicket}
+          customerId={customer.id}
+          customerName={customer.name}
+          customerCompany={customer.company}
+          customerEmail={customerEmail}
+          ticket={{
+            title: resolutionTicket.ticket.title,
+            description: resolutionTicket.ticket.description ?? null,
+            actual_behavior: resolutionTicket.ticket.actual_behavior ?? null,
+            expected_behavior: resolutionTicket.ticket.expected_behavior ?? null,
+            steps_to_reproduce: resolutionTicket.ticket.steps_to_reproduce ?? null,
+            tags: resolutionTicket.ticket.tags,
+          }}
+          onSend={() => commitTicketStatus(resolutionTicket.ticket.id, resolutionTicket.newStatus)}
+          onSkip={() => commitTicketStatus(resolutionTicket.ticket.id, resolutionTicket.newStatus)}
+          onClose={() => setResolutionTicket(null)}
+        />
+      )}
     </div>
   )
 }
 
-function FollowUpRow({ f, onToggle }: { f: FollowUp; onToggle: (id: string, s: string) => void }) {
+function FollowUpRow({ f, onToggle, onDelete, deleting }: {
+  f: FollowUp
+  onToggle: (id: string, s: string) => void
+  onDelete: (id: string) => void
+  deleting: boolean
+}) {
   const { label, color } = dueDateLabel(f.due_date)
   const done = f.status === 'done'
   const ps   = PRIORITY_STYLES[f.priority]
   return (
     <div
-      className="flex items-start gap-3 rounded-xl p-4 transition-opacity"
+      className="group flex items-start gap-3 rounded-xl p-4 transition-opacity"
       style={{
         background: 'var(--card)',
         boxShadow: 'var(--shadow-card)',
@@ -1152,6 +1390,17 @@ function FollowUpRow({ f, onToggle }: { f: FollowUp; onToggle: (id: string, s: s
           {label}
         </span>
       </div>
+      <button
+        onClick={() => onDelete(f.id)}
+        disabled={deleting}
+        className="shrink-0 mt-0.5 opacity-30 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-red-50 disabled:opacity-40"
+        style={{ color: 'rgb(220,38,38)' }}
+        title="Apagar follow-up"
+      >
+        {deleting
+          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          : <Trash2 className="h-3.5 w-3.5" />}
+      </button>
     </div>
   )
 }

@@ -2,10 +2,12 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Building2, Plus, Search, Globe, Users, MailSearch, Loader2, Sparkles } from 'lucide-react'
+import { Building2, Plus, Search, Globe, Users, MailSearch, Loader2, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NewCompanyDialog } from '@/components/new-company-dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 
 interface CompanyRow {
@@ -27,6 +29,29 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
   const [showNew, setShowNew] = useState(false)
   const [importing, setImporting] = useState(false)
   const [cleaning, setCleaning] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<CompanyRow | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  async function deleteCompany(c: CompanyRow) {
+    setDeleting(true)
+    try {
+      const [r1, r2] = await Promise.all([
+        supabase.from('customers').update({ company_id: null }).eq('company_id', c.id),
+        supabase.from('company_integrations').delete().eq('company_id', c.id),
+      ])
+      if (r1.error) throw r1.error
+      if (r2.error) throw r2.error
+      const { error } = await supabase.from('companies').delete().eq('id', c.id)
+      if (error) throw error
+      toast.success(`${c.name} eliminada.`)
+      setDeleteTarget(null)
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao eliminar empresa.')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   async function handleCleanWithAI() {
     setCleaning(true)
@@ -166,7 +191,7 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
             <div
               key={company.id}
               onClick={() => router.push(`/companies/${company.id}`)}
-              className="flex items-center gap-4 rounded-xl p-4 cursor-pointer transition-opacity hover:opacity-80"
+              className="group flex items-center gap-4 rounded-xl p-4 cursor-pointer transition-opacity hover:opacity-80"
               style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
             >
               {/* Icon */}
@@ -206,12 +231,42 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
                   {company.customers.length} contacto{company.customers.length !== 1 ? 's' : ''}
                 </span>
               </div>
+
+              {/* Delete */}
+              <button
+                onClick={(e) => { e.stopPropagation(); setDeleteTarget(company) }}
+                title="Eliminar empresa"
+                className="h-8 w-8 flex items-center justify-center rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 shrink-0"
+                style={{ color: 'rgb(220,38,38)' }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
             </div>
           ))}
         </div>
       )}
 
       <NewCompanyDialog open={showNew} onClose={() => { setShowNew(false); router.refresh() }} />
+
+      <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && !deleting && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Eliminar {deleteTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              {deleteTarget && deleteTarget.customers.length > 0
+                ? `Os ${deleteTarget.customers.length} contacto${deleteTarget.customers.length !== 1 ? 's' : ''} associado${deleteTarget.customers.length !== 1 ? 's' : ''} ficarão sem empresa, mas não serão apagados. `
+                : ''}
+              Integrações desta empresa serão removidas. Ação irreversível.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancelar</Button>
+            <Button onClick={() => deleteTarget && deleteCompany(deleteTarget)} disabled={deleting} className="bg-red-600 hover:bg-red-700 text-white">
+              {deleting ? 'A eliminar…' : 'Eliminar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
