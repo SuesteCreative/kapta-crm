@@ -715,6 +715,7 @@ export function FollowUpsClient({
               bubbles_url: null,
               bubbles_title: null,
               metadata: ei.metadata,
+              is_read: true,
               occurred_at: ei.occurred_at,
               created_at: ei.occurred_at,
             }))}

@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Mail, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
+  Mail, MailOpen, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
   ExternalLink, Paperclip, Reply, ReplyAll, Forward, PenSquare, FileText, Trash2,
   Ticket as TicketIcon, CalendarCheck, AlertTriangle, ChevronRight,
 } from 'lucide-react'
@@ -93,6 +93,7 @@ interface EmailRow {
   subject: string | null
   occurred_at: string
   metadata: Record<string, unknown> | null
+  is_read: boolean
   customers: {
     id: string
     name: string
@@ -145,6 +146,7 @@ const FILTER_DEFS: Array<{ key: InboxFilter; label: string }> = [
 ]
 
 const FILTER_STORAGE_KEY = 'kapta:emails:filter'
+const UNREAD_ON_TOP_STORAGE_KEY = 'kapta:emails:unreadOnTop'
 
 interface StaleThread {
   id: string
@@ -171,6 +173,9 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [filter, setFilter]             = useState<InboxFilter>('all')
   const [syncing, setSyncing]           = useState(false)
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
+  const [readIds, setReadIds]           = useState<Set<string>>(new Set())
+  const [unreadIds, setUnreadIds]       = useState<Set<string>>(new Set())
+  const [unreadOnTop, setUnreadOnTop]   = useState(false)
   const [ticketOpen, setTicketOpen]     = useState(false)
   const [ticketCtx, setTicketCtx]       = useState<{ customer: CustomerWithIdentifiers; interactions: Interaction[]; sourceId: string } | null>(null)
   const [ticketLoading, setTicketLoading] = useState(false)
@@ -199,17 +204,22 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
       .catch(() => { /* silent */ })
   }, [composeOpen]) // refresh when compose dialog closes (in case a draft was saved or sent)
 
-  // Restore filter + stale-banner-dismissed state from localStorage
+  // Restore filter + stale-banner-dismissed + unread-on-top state from localStorage
   useEffect(() => {
     const f = localStorage.getItem(FILTER_STORAGE_KEY)
     if (f === 'all' || f === 'needs_reply' || f === 'inbound' || f === 'outbound') setFilter(f)
     const dismissedDay = localStorage.getItem('kapta:stale:dismissed')
     if (dismissedDay === new Date().toISOString().slice(0, 10)) setStaleDismissed(true)
+    if (localStorage.getItem(UNREAD_ON_TOP_STORAGE_KEY) === '1') setUnreadOnTop(true)
   }, [])
 
   useEffect(() => {
     localStorage.setItem(FILTER_STORAGE_KEY, filter)
   }, [filter])
+
+  useEffect(() => {
+    localStorage.setItem(UNREAD_ON_TOP_STORAGE_KEY, unreadOnTop ? '1' : '0')
+  }, [unreadOnTop])
 
   // Fetch stale threads on mount
   useEffect(() => {
@@ -316,7 +326,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
     setComposeOpen(true)
   }
 
-  // Lazy-fetch full body + html when an email is selected
+  // Lazy-fetch full body + html when an email is selected; also mark as read.
   useEffect(() => {
     if (!selectedId) {
       setSelectedContent(null)
@@ -339,8 +349,40 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
         setSelectedHtml((meta?.html as string | null | undefined) ?? null)
       })
       .then(() => { if (!cancelled) setContentLoading(false) })
+
+    // Mark as read on selection (idempotent + optimistic)
+    const target = emails.find((e) => e.id === selectedId)
+    if (target && !target.is_read && !readIds.has(selectedId) && !unreadIds.has(selectedId)) {
+      const idToMark = selectedId
+      setReadIds((prev) => new Set([...prev, idToMark]))
+      supabase.from('interactions').update({ is_read: true }).eq('id', idToMark)
+        .then(({ error }) => { if (error) console.error('mark-read failed', error) })
+    }
     return () => { cancelled = true }
   }, [selectedId])
+
+  // Effective read state: server value, override with optimistic sets.
+  function isReadEffective(e: EmailRow): boolean {
+    if (unreadIds.has(e.id)) return false
+    if (readIds.has(e.id))   return true
+    return e.is_read
+  }
+
+  async function toggleUnread(id: string, ev: ReactMouseEvent) {
+    ev.stopPropagation()
+    const email = emails.find((e) => e.id === id)
+    if (!email) return
+    const currentlyRead = isReadEffective(email)
+    if (currentlyRead) {
+      setReadIds((prev) => { const n = new Set(prev); n.delete(id); return n })
+      setUnreadIds((prev) => new Set([...prev, id]))
+      await supabase.from('interactions').update({ is_read: false }).eq('id', id)
+    } else {
+      setUnreadIds((prev) => { const n = new Set(prev); n.delete(id); return n })
+      setReadIds((prev) => new Set([...prev, id]))
+      await supabase.from('interactions').update({ is_read: true }).eq('id', id)
+    }
+  }
 
   async function openReply(email: EmailRow) {
     const matched = email.metadata?.matched_email as string | undefined
@@ -428,6 +470,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
 
   const baseVisible = emails.filter((e) => e.metadata?.is_spam !== true && !dismissedIds.has(e.id))
   const needsReplyCount = baseVisible.filter(needsReply).length
+  const unreadCount     = baseVisible.filter((e) => !isReadEffective(e)).length
 
   const filtered = baseVisible.filter((e) => {
     const q = search.toLowerCase()
@@ -443,6 +486,15 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
     if (filter === 'needs_reply') return needsReply(e)
     return true
   })
+
+  if (unreadOnTop) {
+    filtered.sort((a, b) => {
+      const aRead = isReadEffective(a) ? 1 : 0
+      const bRead = isReadEffective(b) ? 1 : 0
+      if (aRead !== bRead) return aRead - bRead
+      return new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime()
+    })
+  }
 
   const selected = selectedId ? filtered.find((e) => e.id === selectedId) ?? null : null
 
@@ -604,6 +656,31 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
               </button>
             )
           })}
+
+          <button
+            onClick={() => setUnreadOnTop((v) => !v)}
+            className="rounded-full px-3 py-1 text-[12px] font-medium transition-all flex items-center gap-1.5"
+            title={unreadOnTop ? 'Ordem cronológica' : 'Não lidos no topo'}
+            style={{
+              background: unreadOnTop ? 'var(--foreground)' : 'var(--card)',
+              color: unreadOnTop ? 'var(--card)' : 'var(--muted-foreground)',
+              border: `1px solid ${unreadOnTop ? 'var(--foreground)' : 'var(--border)'}`,
+            }}
+          >
+            <Mail className="h-3 w-3" />
+            Não lidos no topo
+            {unreadCount > 0 && (
+              <span
+                className="rounded-full px-1.5 text-[10px] font-bold tabular-nums"
+                style={{
+                  background: unreadOnTop ? 'var(--card)' : 'rgba(59,130,246,0.12)',
+                  color: unreadOnTop ? 'var(--foreground)' : 'rgb(37,99,235)',
+                }}
+              >
+                {unreadCount}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -683,18 +760,28 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
           {filtered.map((email) => {
             const isInbound   = email.direction === 'inbound'
             const isSelected  = email.id === selectedId
+            const isUnread    = !isReadEffective(email)
             const attachments = (email.metadata?.attachments as Attachment[] | undefined) ?? []
 
             return (
               <div
                 key={email.id}
-                className="group flex gap-3 px-4 py-3 cursor-pointer row-hover"
+                className="group flex gap-3 px-4 py-3 cursor-pointer row-hover relative"
                 style={{
                   borderBottom: '1px solid var(--border)',
                   background: isSelected ? 'var(--border)' : undefined,
                 }}
                 onClick={() => setSelectedId(email.id)}
               >
+                {/* Unread indicator strip */}
+                {isUnread && (
+                  <div
+                    aria-hidden
+                    className="absolute left-0 top-0 bottom-0 w-[3px]"
+                    style={{ background: 'rgb(37,99,235)' }}
+                  />
+                )}
+
                 {/* Direction icon */}
                 <div
                   className="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0"
@@ -710,7 +797,13 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                 {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="font-medium text-[13px] truncate" style={{ color: 'var(--foreground)' }}>
+                    <span
+                      className="text-[13px] truncate"
+                      style={{
+                        color: 'var(--foreground)',
+                        fontWeight: isUnread ? 700 : 500,
+                      }}
+                    >
                       {email.customers?.name ?? '—'}
                     </span>
                     <span className="text-[11px] shrink-0 tabular-nums" style={{ color: 'var(--muted-foreground)' }}>
@@ -718,7 +811,13 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                     </span>
                   </div>
 
-                  <p className="text-[12.5px] mt-0.5 truncate" style={{ color: 'var(--foreground)' }}>
+                  <p
+                    className="text-[12.5px] mt-0.5 truncate"
+                    style={{
+                      color: 'var(--foreground)',
+                      fontWeight: isUnread ? 600 : 400,
+                    }}
+                  >
                     {email.subject ?? '(sem assunto)'}
                   </p>
 
@@ -729,14 +828,25 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                   )}
                 </div>
 
-                {/* Dismiss */}
-                <button
-                  onClick={(ev) => { ev.stopPropagation(); dismissEmail(email.id, email.metadata) }}
-                  className="shrink-0 self-center opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 hover:bg-[var(--border)]"
-                  title="Arquivar email"
-                >
-                  <X className="h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />
-                </button>
+                {/* Hover actions: mark unread/read + dismiss */}
+                <div className="shrink-0 self-center flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(ev) => toggleUnread(email.id, ev)}
+                    className="rounded p-1 hover:bg-[var(--border)]"
+                    title={isUnread ? 'Marcar como lido' : 'Marcar como não lido'}
+                  >
+                    {isUnread
+                      ? <MailOpen className="h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />
+                      : <Mail     className="h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />}
+                  </button>
+                  <button
+                    onClick={(ev) => { ev.stopPropagation(); dismissEmail(email.id, email.metadata) }}
+                    className="rounded p-1 hover:bg-[var(--border)]"
+                    title="Arquivar email"
+                  >
+                    <X className="h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />
+                  </button>
+                </div>
               </div>
             )
           })}

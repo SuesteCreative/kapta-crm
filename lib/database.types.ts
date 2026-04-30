@@ -123,6 +123,7 @@ export interface Interaction {
   bubbles_url: string | null
   bubbles_title: string | null
   metadata: Record<string, unknown> | null
+  is_read: boolean
   occurred_at: string
   created_at: string
 }

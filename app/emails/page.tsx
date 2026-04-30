@@ -11,7 +11,7 @@ export default async function EmailsPage() {
   const { data: rows } = await supabase
     .from('interactions')
     .select(`
-      id, customer_id, direction, subject, occurred_at, metadata,
+      id, customer_id, direction, subject, occurred_at, metadata, is_read,
       customers ( id, name, company, customer_identifiers ( type, value ) )
     `)
     .eq('type', 'email')

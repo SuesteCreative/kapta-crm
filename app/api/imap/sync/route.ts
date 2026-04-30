@@ -175,6 +175,7 @@ export async function GET(req: NextRequest) {
     content: string | null
     source_id: string
     metadata: Record<string, unknown>
+    is_read: boolean
     occurred_at: string
   }
   const buffer: NewInteraction[] = []
@@ -384,6 +385,7 @@ export async function GET(req: NextRequest) {
               parsed_version: 'mailparser-1',
               ...(bodyHtml ? { html: bodyHtml } : {}),
             },
+            is_read:     effectiveDirection === 'outbound',
             occurred_at: date.toISOString(),
           })
 

@@ -55,6 +55,7 @@ create table interactions (
   bubbles_title text,
   -- Extra metadata
   metadata     jsonb,          -- attachments, participants, cc/bcc, etc.
+  is_read      boolean not null default true,  -- inbound from sync sets false; outbound sets true
   occurred_at  timestamptz not null default now(),
   created_at   timestamptz not null default now()
 );
