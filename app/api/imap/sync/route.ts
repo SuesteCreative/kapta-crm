@@ -183,10 +183,23 @@ export async function GET(req: NextRequest) {
   async function flushBuffer() {
     if (buffer.length === 0) return
     const chunk = buffer.splice(0, buffer.length)
-    const { error } = await supabase
+    let { error } = await supabase
       .from('interactions')
       .upsert(chunk, { onConflict: 'source_id', ignoreDuplicates: true })
+    // Fallback: is_read column missing (migration not applied yet) — retry without it
+    if (error && /is_read/i.test(error.message ?? '')) {
+      const stripped = chunk.map((c) => {
+        const { is_read: _is, ...rest } = c
+        void _is
+        return rest
+      })
+      const retry = await supabase
+        .from('interactions')
+        .upsert(stripped, { onConflict: 'source_id', ignoreDuplicates: true })
+      error = retry.error
+    }
     if (!error) synced += chunk.length
+    else console.error('[imap/sync] insert error:', error.message)
   }
 
   try {
