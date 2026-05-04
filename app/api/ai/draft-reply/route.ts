@@ -61,6 +61,7 @@ type DraftRequest = {
   customer_name: string
   customer_company: string | null
   language?: 'pt-PT' | 'en'
+  user_instruction?: string | null
   interactions: Array<{
     type: string
     direction: string | null
@@ -83,7 +84,7 @@ export async function POST(req: Request) {
 
 async function handle(req: Request) {
   const body = await req.json() as DraftRequest
-  const { customer_id, customer_name, customer_company, interactions, language = 'pt-PT' } = body
+  const { customer_id, customer_name, customer_company, interactions, language = 'pt-PT', user_instruction } = body
 
   if (!interactions || interactions.length === 0) {
     return NextResponse.json({ ok: false, error: 'Sem interações para analisar.' }, { status: 400 })
@@ -106,10 +107,11 @@ async function handle(req: Request) {
     customerContext = null
   }
 
-  // Build thread oldest → newest, max 6 emails
+  // Build thread oldest → newest, up to 30 emails so older context (platform names,
+  // account IDs, prior promises) survives long threads.
   const emailThread = interactions
     .filter((i) => i.type === 'email')
-    .slice(0, 6)
+    .slice(0, 30)
     .reverse()
     .map((i) => {
       const who = i.direction === 'inbound'
@@ -165,7 +167,14 @@ ${text}`
       system: systemBlocks,
       messages: [{
         role: 'user',
-        content: `Write a reply to this email thread. The last message is from ${customer_name} and needs a response.\n\nThread:\n\n${emailThread}\n\nUse "Re: ${lastSubject}" as subject (or adjust slightly if needed).`,
+        content: [
+          `Write a reply to this email thread. The last message is from ${customer_name} and needs a response.`,
+          user_instruction?.trim()
+            ? `\n\nPedro's instructions for THIS reply (override defaults if conflict):\n${user_instruction.trim()}`
+            : '',
+          `\n\nThread (oldest → newest — read all messages, including older ones, before replying):\n\n${emailThread}`,
+          `\n\nUse "Re: ${lastSubject}" as subject (or adjust slightly if needed).`,
+        ].join(''),
       }],
     })
   } catch (err) {

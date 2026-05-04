@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, Check } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import type { CustomerWithIdentifiers, Company } from '@/lib/database.types'
@@ -16,6 +16,96 @@ import type { CustomerWithIdentifiers, Company } from '@/lib/database.types'
 interface Props { open: boolean; customer: CustomerWithIdentifiers; onClose: () => void }
 
 type RelinkPending = { email: string; count: number; sourceNames: string[] }
+
+function CompanyPicker({
+  companies,
+  valueId,
+  onChange,
+}: {
+  companies: Company[]
+  valueId: string
+  onChange: (id: string, name: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onClick(e: MouseEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
+
+  useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 10) }, [open])
+
+  const selected = companies.find((c) => c.id === valueId)
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? companies.filter((c) => c.name.toLowerCase().includes(q))
+    : companies
+
+  function pick(id: string, name: string) {
+    onChange(id, name)
+    setOpen(false)
+    setQuery('')
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+      >
+        <span className={selected ? '' : 'text-muted-foreground'}>
+          {selected?.name ?? 'Sem empresa'}
+        </span>
+        <ChevronDown className="h-4 w-4 opacity-50" />
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full min-w-[260px] rounded-md border bg-popover text-popover-foreground shadow-md">
+          <div className="p-2 border-b">
+            <Input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Procurar empresa…"
+              className="h-8"
+            />
+          </div>
+          <div className="max-h-60 overflow-y-auto py-1">
+            <button
+              type="button"
+              onClick={() => pick('', '')}
+              className="flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-accent"
+            >
+              <span className="text-muted-foreground">Sem empresa</span>
+              {!valueId && <Check className="h-4 w-4" />}
+            </button>
+            {filtered.map((c) => (
+              <button
+                type="button"
+                key={c.id}
+                onClick={() => pick(c.id, c.name)}
+                className="flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-accent"
+              >
+                <span>{c.name}</span>
+                {valueId === c.id && <Check className="h-4 w-4" />}
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <div className="px-3 py-2 text-sm text-muted-foreground">Sem resultados</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function EditCustomerDialog({ open, customer, onClose }: Props) {
   const [loading, setLoading] = useState(false)
@@ -153,16 +243,11 @@ export function EditCustomerDialog({ open, customer, onClose }: Props) {
               </div>
               <div className="space-y-1.5">
                 <Label>Empresa</Label>
-                <Select value={form.company_id || '__none__'} onValueChange={(v) => {
-                  const selected = companies.find((c) => c.id === v)
-                  setForm({ ...form, company_id: v === '__none__' ? '' : v, company: selected?.name ?? form.company })
-                }}>
-                  <SelectTrigger><SelectValue placeholder="Sem empresa" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Sem empresa</SelectItem>
-                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <CompanyPicker
+                  companies={companies}
+                  valueId={form.company_id}
+                  onChange={(id, name) => setForm({ ...form, company_id: id, company: id ? name : '' })}
+                />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">

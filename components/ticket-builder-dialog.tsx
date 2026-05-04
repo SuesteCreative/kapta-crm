@@ -98,15 +98,75 @@ export function TicketBuilderDialog({ open, customer, interactions = [], sourceI
   const [suggesting, setSuggesting] = useState(false)
   const [copied, setCopied] = useState(false)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
+  const [aiInstruction, setAiInstruction] = useState('')
+
+  async function runSuggest(instruction?: string) {
+    if (interactions.length === 0) return
+    setSuggesting(true)
+    try {
+      const res = await fetch('/api/ai/suggest-ticket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_name: customer.name,
+          customer_company: customer.company ?? null,
+          user_instruction: instruction?.trim() || null,
+          interactions: interactions.slice(0, 20).map((i) => ({
+            type: i.type,
+            direction: i.direction,
+            subject: i.subject,
+            content: i.content,
+            occurred_at: i.occurred_at,
+            metadata: i.metadata ?? null,
+          })),
+        }),
+      })
+      const text = await res.text()
+      let json: {
+        ok: boolean
+        title?: string; description?: string
+        steps_to_reproduce?: string | null
+        expected_behavior?: string | null
+        actual_behavior?: string | null
+        priority?: string; tags?: string[]
+        platform?: Platform | null
+        input_platform?: InputPlatform | null
+        output_platform?: OutputPlatform | null
+        account_number?: string | null
+        references?: string[] | null
+      }
+      try { json = JSON.parse(text) } catch { return }
+      if (!json.ok) return
+      setForm((prev) => ({
+        ...prev,
+        title: json.title ?? prev.title,
+        description: json.description ?? prev.description,
+        steps_to_reproduce: json.steps_to_reproduce ?? prev.steps_to_reproduce,
+        expected_behavior: json.expected_behavior ?? prev.expected_behavior,
+        actual_behavior: json.actual_behavior ?? prev.actual_behavior,
+        priority: json.priority ?? prev.priority,
+        tags: (json.tags ?? []).join(', ') || prev.tags,
+        // Prefer existing (regex/manual) values; fill blanks from AI.
+        platform: prev.platform || (json.platform ?? ''),
+        input_platform: prev.input_platform || (json.input_platform ?? ''),
+        output_platform: prev.output_platform || (json.output_platform ?? ''),
+        account_number: prev.account_number || (json.account_number ?? ''),
+        references_list: prev.references_list.length ? prev.references_list : (json.references ?? []),
+      }))
+    } finally {
+      setSuggesting(false)
+    }
+  }
 
   // Auto-suggest + regex prefill when dialog opens with interactions
   useEffect(() => {
     if (!open) return
     setForm(EMPTY_FORM)
+    setAiInstruction('')
     if (interactions.length === 0) return
 
-    // Regex prefill (synchronous, deterministic)
-    const bodies = interactions.slice(0, 3).map((i) => stripHtml(i.content ?? '')).join('\n\n')
+    // Regex prefill (synchronous, deterministic) — uses last 8 emails
+    const bodies = interactions.slice(0, 8).map((i) => stripHtml(i.content ?? '')).join('\n\n')
     const hints = extractTicketHints(bodies)
 
     setForm((prev) => ({
@@ -118,46 +178,7 @@ export function TicketBuilderDialog({ open, customer, interactions = [], sourceI
       references_list: hints.references ?? [],
     }))
 
-    async function suggest() {
-      setSuggesting(true)
-      try {
-        const res = await fetch('/api/ai/suggest-ticket', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            customer_name: customer.name,
-            customer_company: customer.company ?? null,
-            interactions: interactions.slice(0, 8).map((i) => ({
-              type: i.type,
-              direction: i.direction,
-              subject: i.subject,
-              content: i.content,
-              occurred_at: i.occurred_at,
-              metadata: i.metadata ?? null,
-            })),
-          }),
-        })
-        const text = await res.text()
-        let json: { ok: boolean; title?: string; description?: string; steps_to_reproduce?: string | null; expected_behavior?: string | null; actual_behavior?: string | null; priority?: string; tags?: string[] }
-        try { json = JSON.parse(text) } catch { return }
-        if (!json.ok) return
-        // AI owns prose; regex-derived structured fields preserved.
-        setForm((prev) => ({
-          ...prev,
-          title: json.title ?? '',
-          description: json.description ?? '',
-          steps_to_reproduce: json.steps_to_reproduce ?? '',
-          expected_behavior: json.expected_behavior ?? '',
-          actual_behavior: json.actual_behavior ?? '',
-          priority: json.priority ?? 'medium',
-          tags: (json.tags ?? []).join(', '),
-        }))
-      } finally {
-        setSuggesting(false)
-      }
-    }
-
-    suggest()
+    runSuggest()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
@@ -238,6 +259,32 @@ export function TicketBuilderDialog({ open, customer, interactions = [], sourceI
           </TabsList>
 
           <TabsContent value="form" className="space-y-4 mt-4">
+            {interactions.length > 0 && (
+              <div className="space-y-1.5 rounded-lg p-3" style={{ background: 'rgba(91,91,214,0.06)', border: '1px solid rgba(91,91,214,0.2)' }}>
+                <Label className="text-[12px]" style={{ color: 'var(--primary)' }}>
+                  Instruções para a IA (opcional)
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={aiInstruction}
+                    onChange={(e) => setAiInstruction(e.target.value)}
+                    placeholder="ex. focar em Shopify, prioridade alta, ignorar email mais antigo…"
+                    disabled={suggesting}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => runSuggest(aiInstruction)}
+                    disabled={suggesting}
+                    className="shrink-0 gap-1.5"
+                  >
+                    {suggesting
+                      ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> A analisar…</>
+                      : <><Sparkles className="h-3.5 w-3.5" /> Re-gerar</>}
+                  </Button>
+                </div>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label>Título *</Label>
               <Input

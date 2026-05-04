@@ -27,6 +27,49 @@ function isAutomatedSender(email: string): boolean {
   return AUTOMATED_PREFIXES.some((p) => local === p || local.startsWith(p + '-') || local.startsWith(p + '_'))
 }
 
+const PERSONAL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.co.uk', 'hotmail.fr',
+  'outlook.com', 'outlook.pt', 'live.com', 'msn.com', 'yahoo.com', 'yahoo.co.uk',
+  'yahoo.es', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'gmx.com', 'gmx.de',
+  'protonmail.com', 'proton.me', 'sapo.pt', 'clix.pt', 'iol.pt', 'netcabo.pt',
+  'mail.com', 'zoho.com', 'pm.me',
+])
+
+const TLD_STRIP_RE = /\.(com|net|org|io|co|pt|eu|uk|us|br|de|fr|es|it|nl|be|ch|at|au|nz|ca|app|dev|ai|tech|digital|agency|studio|group|cloud)\b.*/i
+
+function titleCase(s: string): string {
+  return s.split(/\s+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+}
+
+function domainToCompanyName(domain: string): string {
+  const base = domain.replace(TLD_STRIP_RE, '').replace(/\.[a-z]{2,4}$/, '')
+  return base.split(/[-_.]/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+}
+
+function deriveCompanyFromSender(email: string, displayName: string): { name: string; domain: string | null } | null {
+  const parts = email.toLowerCase().split('@')
+  if (parts.length !== 2) return null
+  const local = parts[0].replace(/\+.*$/, '')
+  const domain = parts[1]
+
+  if (!PERSONAL_DOMAINS.has(domain)) {
+    return { name: domainToCompanyName(domain), domain }
+  }
+
+  const dn = displayName?.trim() ?? ''
+  if (dn && /\s/.test(dn) && !dn.includes('@')) {
+    const words = dn.split(/\s+/).filter(Boolean)
+    if (words.length >= 2) return { name: titleCase(dn), domain: null }
+  }
+
+  const tokens = local.split(/[._\-]/).filter(Boolean)
+  if (tokens.length >= 2) {
+    return { name: tokens.map((t) => t.charAt(0).toUpperCase() + t.slice(1)).join(' '), domain: null }
+  }
+
+  return null
+}
+
 function extractForwardedSender(body: string): { email: string; name: string } | null {
   const patterns = [
     /^[>\s]*From:\s+(?:"?([^"<\r\n]+?)"?\s+)?<([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})>/im,
@@ -92,6 +135,40 @@ export async function GET(req: NextRequest) {
   const emailToCustomerId = new Map<string, string>()
   for (const id of allIdentifiers ?? []) {
     emailToCustomerId.set(id.value.toLowerCase().trim(), id.customer_id)
+  }
+
+  const { data: allCompanies } = await supabase
+    .from('companies')
+    .select('id, name, domain')
+
+  const companyByDomain = new Map<string, { id: string; name: string }>()
+  const companyByName   = new Map<string, { id: string; name: string }>()
+  for (const c of allCompanies ?? []) {
+    if (c.domain) companyByDomain.set(c.domain.toLowerCase(), { id: c.id, name: c.name })
+    companyByName.set(c.name.toLowerCase(), { id: c.id, name: c.name })
+  }
+
+  async function ensureCompany(email: string, displayName: string): Promise<{ id: string; name: string } | null> {
+    const derived = deriveCompanyFromSender(email, displayName)
+    if (!derived) return null
+
+    if (derived.domain && companyByDomain.has(derived.domain)) {
+      return companyByDomain.get(derived.domain)!
+    }
+    const byName = companyByName.get(derived.name.toLowerCase())
+    if (byName) return byName
+
+    const { data: created, error } = await supabase
+      .from('companies')
+      .insert({ name: derived.name, domain: derived.domain, updated_at: new Date().toISOString() })
+      .select('id, name, domain')
+      .single()
+    if (error || !created) return null
+
+    const entry = { id: created.id, name: created.name }
+    if (created.domain) companyByDomain.set(created.domain.toLowerCase(), entry)
+    companyByName.set(created.name.toLowerCase(), entry)
+    return entry
   }
 
   const { data: latestEmail } = await supabase
@@ -334,9 +411,17 @@ export async function GET(req: NextRequest) {
           if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail) {
             const senderName = primarySenderName || primarySenderEmail.split('@')[0]
 
+            const company = await ensureCompany(primarySenderEmail, primarySenderName)
+
             const { data: newCustomer, error: insertErr } = await supabase
               .from('customers')
-              .insert({ name: senderName, status: 'onboarding', health_score: 3 })
+              .insert({
+                name: senderName,
+                status: 'onboarding',
+                health_score: 3,
+                company:    company?.name ?? null,
+                company_id: company?.id   ?? null,
+              })
               .select('id')
               .single()
 

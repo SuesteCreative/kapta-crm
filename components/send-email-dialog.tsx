@@ -160,6 +160,7 @@ export function SendEmailDialog({
   const [language,    setLanguage]    = useState<'pt-PT' | 'en'>('pt-PT')
   const [refineInput, setRefineInput] = useState('')
   const [refining,    setRefining]    = useState(false)
+  const [aiInstruction, setAiInstruction] = useState('')
 
   useEffect(() => { setTo(customerEmail) }, [customerEmail])
 
@@ -200,7 +201,8 @@ export function SendEmailDialog({
           customer_name: customerName,
           customer_company: customerCompany ?? null,
           language,
-          interactions: interactions.slice(0, 6).map((i) => ({
+          user_instruction: aiInstruction.trim() || null,
+          interactions: interactions.slice(0, 30).map((i) => ({
             type: i.type,
             direction: i.direction,
             subject: i.subject,
@@ -289,6 +291,7 @@ export function SendEmailDialog({
     setCc('')
     setBcc('')
     setRefineInput('')
+    setAiInstruction('')
     onClose()
   }
 
@@ -317,7 +320,16 @@ export function SendEmailDialog({
 
           {/* AI Draft button + language toggle */}
           {hasEmailHistory && (
-            <div className="flex gap-2">
+            <div className="space-y-2">
+              <Textarea
+                rows={2}
+                value={aiInstruction}
+                onChange={(e) => setAiInstruction(e.target.value)}
+                placeholder="Instruções para a IA (opcional): ex. confirmar prazo, propor reunião, ser mais directo…"
+                disabled={drafting}
+                style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', resize: 'none' }}
+              />
+              <div className="flex gap-2">
               <Button
                 onClick={handleDraftWithAI}
                 disabled={drafting}
@@ -346,6 +358,7 @@ export function SendEmailDialog({
                     {lang === 'pt-PT' ? 'PT' : 'EN'}
                   </button>
                 ))}
+              </div>
               </div>
             </div>
           )}
