@@ -961,9 +961,14 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                       {messages.map((m) => {
                         const isOut = m.direction === 'outbound'
                         const cleaned = m.content ? stripHtml(m.content) : ''
-                        const truncated = cleaned.length > 200 ? cleaned.slice(0, 200) + '…' : cleaned
+                        const isExpanded = expanded.has(m.id)
+                        const isLong = cleaned.length > 200
+                        const preview = isLong ? cleaned.slice(0, 200) + '…' : cleaned
+                        const htmlBody = isExpanded
+                          ? ((m.metadata as Record<string, unknown> | null)?.html as string | undefined)
+                          : undefined
                         return (
-                          <div key={m.id} className="group px-4 py-3 space-y-1">
+                          <div key={m.id} className="group px-4 py-3 space-y-1.5">
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-1.5">
                                 <span
@@ -988,11 +993,47 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                                 </button>
                               </div>
                             </div>
-                            {truncated && (
+                            {isExpanded ? (
+                              htmlBody ? (
+                                <EmailHtmlViewer html={htmlBody} text={cleaned} />
+                              ) : (
+                                <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--foreground)' }}>
+                                  {cleaned}
+                                </p>
+                              )
+                            ) : preview ? (
                               <p className="text-sm leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
-                                {truncated}
+                                {preview}
                               </p>
-                            )}
+                            ) : null}
+                            <div className="flex items-center gap-3">
+                              {(isLong || isExpanded) && (
+                                <button
+                                  onClick={() => toggleExpand(m.id)}
+                                  className="flex items-center gap-1 text-[11px] font-medium transition-opacity hover:opacity-70"
+                                  style={{ color: 'var(--primary)' }}
+                                >
+                                  {isExpanded
+                                    ? <><ChevronUp className="h-3 w-3" /> Ver menos</>
+                                    : <><ChevronDown className="h-3 w-3" /> Ver mais</>}
+                                </button>
+                              )}
+                              {!isOut && (
+                                <button
+                                  onClick={() => {
+                                    const raw = m.subject ?? subject ?? ''
+                                    const subj = /^re:/i.test(raw) ? raw : (raw ? `Re: ${raw}` : '')
+                                    setReplySubject(subj)
+                                    setShowSendEmail(true)
+                                  }}
+                                  className="flex items-center gap-1 text-[11px] font-medium transition-opacity hover:opacity-70"
+                                  style={{ color: 'var(--primary)' }}
+                                  title="Responder a este email"
+                                >
+                                  <Reply className="h-3 w-3" /> Responder
+                                </button>
+                              )}
+                            </div>
                           </div>
                         )
                       })}
