@@ -261,6 +261,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
   const [copiedTicketId,     setCopiedTicketId]     = useState<string | null>(null)
   const [resolutionTicket,   setResolutionTicket]   = useState<{ ticket: Ticket; newStatus: string } | null>(null)
   const [deletingTicketId,   setDeletingTicketId]   = useState<string | null>(null)
+  const [editingTicket,      setEditingTicket]      = useState<Ticket | null>(null)
   const [deletingFollowUpId, setDeletingFollowUpId] = useState<string | null>(null)
 
   const customerEmail = customer.customer_identifiers.find((i) => i.type === 'email')?.value ?? null
@@ -1239,6 +1240,14 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
                       <MessageCircle className="h-3.5 w-3.5" />
                     </button>
                     <button
+                      onClick={() => { setEditingTicket(t); setShowTicketBuilder(true) }}
+                      className="h-7 w-7 flex items-center justify-center rounded-lg transition-colors hover:opacity-70"
+                      style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                      title="Editar ticket"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
                       onClick={() => copyTicket(t)}
                       className="h-7 w-7 flex items-center justify-center rounded-lg transition-colors"
                       style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
@@ -1310,7 +1319,7 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
       {/* Modals */}
       <AddInteractionDialog    open={showAddInteraction}    customerId={customer.id} onClose={() => { setShowAddInteraction(false);    refresh() }} />
       <AddFollowUpDialog       open={showAddFollowUp}       customerId={customer.id} customerName={customer.name} customerCompany={customer.company} interactions={interactions.slice(0, 8).map((i) => ({ type: i.type, direction: i.direction, subject: i.subject, content: i.content, occurred_at: i.occurred_at }))} onClose={() => { setShowAddFollowUp(false);       refresh() }} />
-      <TicketBuilderDialog     open={showTicketBuilder}     customer={customer}     interactions={interactions}     onClose={() => { setShowTicketBuilder(false);     refresh() }} />
+      <TicketBuilderDialog     open={showTicketBuilder}     customer={customer}     interactions={interactions}     editTicket={editingTicket}     onClose={() => { setShowTicketBuilder(false); setEditingTicket(null); refresh() }} />
       <EditCustomerDialog      open={showEditCustomer}      customer={customer}      onClose={() => { setShowEditCustomer(false);      refresh() }} />
       <PasteConversationDialog open={showPasteConversation} customerId={customer.id} onClose={() => { setShowPasteConversation(false); refresh() }} />
       <SendEmailDialog

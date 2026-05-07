@@ -15,7 +15,7 @@ import { toast } from 'sonner'
 import {
   PLATFORMS, INPUT_PLATFORMS, OUTPUT_PLATFORMS,
   PLATFORM_LABELS, INPUT_PLATFORM_LABELS, OUTPUT_PLATFORM_LABELS,
-  type CustomerWithIdentifiers, type Interaction,
+  type CustomerWithIdentifiers, type Interaction, type Ticket,
   type Platform, type InputPlatform, type OutputPlatform,
 } from '@/lib/database.types'
 import { extractTicketHints } from '@/lib/extract-ticket-fields'
@@ -26,6 +26,7 @@ interface Props {
   customer: CustomerWithIdentifiers
   interactions?: Interaction[]
   sourceInteractionId?: string | null
+  editTicket?: Ticket | null
   onClose: () => void
 }
 
@@ -93,7 +94,8 @@ ${form.tags ? `## Tags\n${form.tags.split(',').map((t) => `\`${t.trim()}\``).joi
 *Gerado em ${new Date().toLocaleString('pt-PT')} via Kapta CRM*`
 }
 
-export function TicketBuilderDialog({ open, customer, interactions = [], sourceInteractionId = null, onClose }: Props) {
+export function TicketBuilderDialog({ open, customer, interactions = [], sourceInteractionId = null, editTicket = null, onClose }: Props) {
+  const isEdit = !!editTicket
   const [loading, setLoading] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -161,8 +163,28 @@ export function TicketBuilderDialog({ open, customer, interactions = [], sourceI
   // Auto-suggest + regex prefill when dialog opens with interactions
   useEffect(() => {
     if (!open) return
-    setForm(EMPTY_FORM)
     setAiInstruction('')
+
+    if (editTicket) {
+      setForm({
+        title: editTicket.title,
+        description: editTicket.description ?? '',
+        steps_to_reproduce: editTicket.steps_to_reproduce ?? '',
+        expected_behavior: editTicket.expected_behavior ?? '',
+        actual_behavior: editTicket.actual_behavior ?? '',
+        priority: editTicket.priority,
+        status: editTicket.status,
+        tags: editTicket.tags.join(', '),
+        platform: editTicket.platform ?? '',
+        input_platform: editTicket.input_platform ?? '',
+        output_platform: editTicket.output_platform ?? '',
+        account_number: editTicket.account_number ?? '',
+        references_list: editTicket.references_list ?? [],
+      })
+      return
+    }
+
+    setForm(EMPTY_FORM)
     if (interactions.length === 0) return
 
     // Regex prefill (synchronous, deterministic) — uses last 8 emails
@@ -180,7 +202,7 @@ export function TicketBuilderDialog({ open, customer, interactions = [], sourceI
 
     runSuggest()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, editTicket?.id])
 
   const ticketText = form.title ? buildTicketText(form, customer) : ''
 
@@ -188,8 +210,7 @@ export function TicketBuilderDialog({ open, customer, interactions = [], sourceI
     if (!form.title.trim()) { toast.error('Título obrigatório.'); return }
     setLoading(true)
     try {
-      const { error } = await supabase.from('tickets').insert({
-        customer_id: customer.id,
+      const payload = {
         title: form.title.trim(),
         description: form.description || null,
         steps_to_reproduce: form.steps_to_reproduce || null,
@@ -203,13 +224,23 @@ export function TicketBuilderDialog({ open, customer, interactions = [], sourceI
         output_platform: form.output_platform || null,
         account_number: form.account_number.trim() || null,
         references_list: form.references_list,
-        source_interaction_id: sourceInteractionId,
-      })
-      if (error) throw error
-      toast.success('Ticket guardado!')
+      }
+      if (isEdit && editTicket) {
+        const { error } = await supabase.from('tickets').update(payload).eq('id', editTicket.id)
+        if (error) throw error
+        toast.success('Ticket atualizado!')
+      } else {
+        const { error } = await supabase.from('tickets').insert({
+          ...payload,
+          customer_id: customer.id,
+          source_interaction_id: sourceInteractionId,
+        })
+        if (error) throw error
+        toast.success('Ticket guardado!')
+      }
       onClose()
     } catch {
-      toast.error('Erro ao guardar ticket.')
+      toast.error(isEdit ? 'Erro ao atualizar ticket.' : 'Erro ao guardar ticket.')
     } finally {
       setLoading(false)
     }
@@ -233,7 +264,7 @@ export function TicketBuilderDialog({ open, customer, interactions = [], sourceI
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            Ticket — {customer.name}
+            {isEdit ? 'Editar ticket' : 'Ticket'} — {customer.name}
             {suggesting && (
               <span className="flex items-center gap-1.5 text-[12px] font-normal" style={{ color: 'var(--primary)' }}>
                 <Loader2 className="h-3 w-3 animate-spin" /> A analisar emails…
@@ -259,7 +290,7 @@ export function TicketBuilderDialog({ open, customer, interactions = [], sourceI
           </TabsList>
 
           <TabsContent value="form" className="space-y-4 mt-4">
-            {interactions.length > 0 && (
+            {!isEdit && interactions.length > 0 && (
               <div className="space-y-1.5 rounded-lg p-3" style={{ background: 'rgba(91,91,214,0.06)', border: '1px solid rgba(91,91,214,0.2)' }}>
                 <Label className="text-[12px]" style={{ color: 'var(--primary)' }}>
                   Instruções para a IA (opcional)
@@ -441,7 +472,9 @@ export function TicketBuilderDialog({ open, customer, interactions = [], sourceI
             </Button>
           )}
           <Button onClick={handleSave} disabled={loading || suggesting}>
-            {loading ? 'A guardar…' : 'Guardar ticket'}
+            {loading
+              ? (isEdit ? 'A atualizar…' : 'A guardar…')
+              : (isEdit ? 'Guardar alterações' : 'Guardar ticket')}
           </Button>
         </DialogFooter>
       </DialogContent>
