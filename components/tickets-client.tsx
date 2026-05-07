@@ -268,6 +268,11 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
     toast.success('A abrir WhatsApp · Dev Team')
   }
 
+  async function copyWhatsApp(t: TicketWithCustomer) {
+    await navigator.clipboard.writeText(ticketToWhatsApp(t))
+    toast.success('Mensagem WhatsApp copiada')
+  }
+
   async function copyTicket(t: TicketWithCustomer) {
     await navigator.clipboard.writeText(ticketToText(t))
     setCopiedId(t.id)
@@ -582,6 +587,14 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
                       Reabrir
                     </button>
                   )}
+                  <button
+                    onClick={() => copyWhatsApp(t)}
+                    className="h-7 w-7 flex items-center justify-center rounded-lg transition-colors"
+                    style={{ background: 'rgba(37,211,102,0.08)', color: '#25D366' }}
+                    title="Copiar mensagem WhatsApp"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
                   <button
                     onClick={() => sendToDevTeam(t)}
                     className="h-7 w-7 flex items-center justify-center rounded-lg transition-colors"
