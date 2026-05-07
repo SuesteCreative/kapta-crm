@@ -90,16 +90,18 @@ export function Sidebar() {
       }}
     >
       {/* Logo */}
-      <div
-        className="flex items-center gap-2.5 px-5 py-5"
+      <Link
+        href="/"
+        className="flex items-center gap-2.5 px-5 py-5 transition-opacity hover:opacity-80"
         style={{ borderBottom: '1px solid var(--sidebar-border)' }}
       >
-        <div
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0"
-          style={{ background: 'var(--primary)' }}
-        >
-          K
-        </div>
+        <img
+          src="/SVG/mini-logo-white.svg"
+          alt="Kapta"
+          width={28}
+          height={25}
+          className="shrink-0"
+        />
         <div>
           <p className="text-sm font-semibold leading-none" style={{ color: '#E8EAF0' }}>
             Kapta
@@ -108,7 +110,7 @@ export function Sidebar() {
             CRM
           </p>
         </div>
-      </div>
+      </Link>
 
       {/* Nav */}
       <nav className="flex-1 px-2.5 py-3 space-y-0.5">

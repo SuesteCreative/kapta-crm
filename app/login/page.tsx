@@ -52,21 +52,16 @@ export default function LoginPage() {
         style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 mb-8">
-          <div
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold"
-            style={{ background: 'var(--primary)' }}
-          >
-            K
-          </div>
-          <div>
-            <p className="text-base font-semibold leading-none" style={{ color: 'var(--foreground)' }}>
-              Kapta CRM
-            </p>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-              Acesso privado
-            </p>
-          </div>
+        <div className="flex flex-col items-center gap-2 mb-8">
+          <img
+            src="/SVG/logo-black.svg"
+            alt="Kapta"
+            width={140}
+            height={42}
+          />
+          <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+            CRM · Acesso privado
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
