@@ -263,9 +263,9 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
   async function sendToDevTeam(t: TicketWithCustomer) {
     const msg = ticketToWhatsApp(t)
     try { await navigator.clipboard.writeText(msg) } catch {}
-    const url = `https://wa.me/?text=${encodeURIComponent(msg)}`
+    const url = `https://wa.me/351919993469?text=${encodeURIComponent(msg)}`
     window.open(url, '_blank', 'noopener,noreferrer')
-    toast.success('A abrir WhatsApp · escolhe contacto ou grupo')
+    toast.success('A abrir WhatsApp · Dev Team')
   }
 
   async function copyTicket(t: TicketWithCustomer) {
