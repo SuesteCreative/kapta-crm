@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Mail, MailOpen, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
   ExternalLink, Paperclip, Reply, ReplyAll, Forward, PenSquare, FileText, Trash2,
-  Ticket as TicketIcon, CalendarCheck, AlertTriangle, ChevronRight,
+  Ticket as TicketIcon, CalendarCheck, AlertTriangle, ChevronRight, Plug,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
@@ -18,6 +18,8 @@ import { EmailActionPanel } from '@/components/email-action-panel'
 import { ComposeEmailDialog, type ComposeInitialState } from '@/components/compose-email-dialog'
 import { TicketBuilderDialog } from '@/components/ticket-builder-dialog'
 import { FollowUpDialog } from '@/components/follow-up-dialog'
+import { FhIntegrationDialog } from '@/components/fh-integration-dialog'
+import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
 import type { Recipient } from '@/components/recipient-picker'
 import type { Interaction, CustomerIdentifier, CustomerWithIdentifiers } from '@/lib/database.types'
 
@@ -181,6 +183,8 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [ticketLoading, setTicketLoading] = useState(false)
   const [followUpOpen, setFollowUpOpen] = useState(false)
   const [followUpCtx, setFollowUpCtx]   = useState<{ customer_id: string; customer_name: string; subject: string } | null>(null)
+  const [fhOpen, setFhOpen]             = useState(false)
+  const [fhCtx, setFhCtx]               = useState<{ sourceId: string; prefill: FhIntegrationParsed | null } | null>(null)
   const [staleThreads, setStaleThreads] = useState<StaleThread[]>([])
   const [staleDismissed, setStaleDismissed] = useState(false)
   const [selectedId, setSelectedId]     = useState<string | null>(null)
@@ -263,6 +267,12 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
       subject: email.subject ?? '',
     })
     setFollowUpOpen(true)
+  }
+
+  function openFhIntegration(email: EmailRow) {
+    const parsed = (email.metadata?.fh_parsed as FhIntegrationParsed | undefined) ?? null
+    setFhCtx({ sourceId: email.id, prefill: parsed })
+    setFhOpen(true)
   }
 
   function selectStaleThread(t: StaleThread) {
@@ -821,11 +831,31 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                     {email.subject ?? '(sem assunto)'}
                   </p>
 
-                  {attachments.length > 0 && (
-                    <div className="flex items-center gap-2 mt-0.5">
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {attachments.length > 0 && (
                       <Paperclip className="h-3 w-3 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
-                    </div>
-                  )}
+                    )}
+                    {email.metadata?.fh_integration_request === true && !email.metadata?.fh_integration_id && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium shrink-0"
+                        style={{ background: 'rgba(91,91,214,0.12)', color: 'var(--primary)' }}
+                        title="Pedido de integração FareHarbor detectado"
+                      >
+                        <Plug className="h-2.5 w-2.5" />
+                        FH
+                      </span>
+                    )}
+                    {email.metadata?.fh_integration_id != null && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium shrink-0"
+                        style={{ background: 'rgba(45,185,117,0.1)', color: 'var(--status-active)' }}
+                        title="Integração FareHarbor já criada"
+                      >
+                        <Plug className="h-2.5 w-2.5" />
+                        FH ✓
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Hover actions: mark unread/read + dismiss */}
@@ -928,6 +958,29 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                         : <TicketIcon className="h-3 w-3" />}
                       Ticket
                     </button>
+                    {selected.metadata?.fh_integration_request === true && (
+                      selected.metadata?.fh_integration_id ? (
+                        <button
+                          onClick={() => router.push(`/fareharbor/${selected.metadata!.fh_integration_id as string}`)}
+                          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70"
+                          style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)', border: '1px solid rgba(91,91,214,0.3)' }}
+                          title="Abrir integração FareHarbor"
+                        >
+                          <Plug className="h-3 w-3" />
+                          Ver FH
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => openFhIntegration(selected)}
+                          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70"
+                          style={{ background: 'rgba(91,91,214,0.08)', color: 'var(--primary)', border: '1px solid rgba(91,91,214,0.25)' }}
+                          title="Criar integração FareHarbor a partir deste email"
+                        >
+                          <Plug className="h-3 w-3" />
+                          FH
+                        </button>
+                      )
+                    )}
                     <button
                       onClick={() => openFollowUp(selected)}
                       className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70"
@@ -1093,6 +1146,15 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
           customerName={followUpCtx.customer_name}
           subject={followUpCtx.subject}
           onClose={() => { setFollowUpOpen(false); setFollowUpCtx(null) }}
+        />
+      )}
+
+      {fhCtx && (
+        <FhIntegrationDialog
+          open={fhOpen}
+          sourceInteractionId={fhCtx.sourceId}
+          prefill={fhCtx.prefill}
+          onClose={() => { setFhOpen(false); setFhCtx(null) }}
         />
       )}
     </div>

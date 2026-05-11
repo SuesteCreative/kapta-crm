@@ -162,6 +162,40 @@ export interface Ticket {
   updated_at: string
 }
 
+export type FhIntegrationStatus = 'new' | 'onboarding' | 'live' | 'troubleshoot' | 'follow_up' | 'churned'
+export type FhCountry = 'PT' | 'ES' | 'other'
+
+export const FH_INVOICING_SYSTEMS_PT = ['IGEST', 'Moloni', 'InvoiceXpress'] as const
+export const FH_INVOICING_SYSTEMS_ES = ['Holded', 'Billin', 'Sage'] as const
+export const FH_INVOICING_SYSTEMS = [...FH_INVOICING_SYSTEMS_PT, ...FH_INVOICING_SYSTEMS_ES, 'Outro'] as const
+
+export const FH_STATUS_LABELS: Record<FhIntegrationStatus, string> = {
+  new:          'Novo',
+  onboarding:   'Onboarding',
+  live:         'Em produção',
+  troubleshoot: 'Troubleshoot',
+  follow_up:    'Follow-up',
+  churned:      'Churned',
+}
+
+export interface FhIntegration {
+  id: string
+  shortname: string
+  name: string
+  email: string
+  country: FhCountry | null
+  invoicing_system: string | null
+  authorization: boolean
+  fh_api_key: string | null
+  status: FhIntegrationStatus
+  customer_id: string | null
+  source_interaction_id: string | null
+  notes: string | null
+  last_contact_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface Template {
   id: string
   name: string
@@ -194,6 +228,7 @@ export type Database = {
       tickets: { Row: Ticket; Insert: Omit<Ticket, 'id' | 'created_at' | 'updated_at'>; Update: Partial<Omit<Ticket, 'id'>> }
       templates: { Row: Template; Insert: Omit<Template, 'id' | 'created_at'>; Update: Partial<Omit<Template, 'id'>> }
       company_integrations: { Row: CompanyIntegration; Insert: Omit<CompanyIntegration, 'id' | 'created_at' | 'updated_at'>; Update: Partial<Omit<CompanyIntegration, 'id'>> }
+      fh_integrations: { Row: FhIntegration; Insert: Omit<FhIntegration, 'id' | 'created_at' | 'updated_at'>; Update: Partial<Omit<FhIntegration, 'id'>> }
     }
   }
 }

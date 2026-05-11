@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Users, CalendarCheck, Ticket,
-  FileText, RefreshCw, ChevronRight, Loader2, Building2, Settings, Mail, LogOut, ClipboardPaste,
+  FileText, RefreshCw, ChevronRight, Loader2, Building2, Settings, Mail, LogOut, ClipboardPaste, Plug,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { GlobalPasteDialog } from '@/components/global-paste-dialog'
@@ -17,6 +17,7 @@ const nav = [
   { href: '/emails',      label: 'Emails',      icon: Mail },
   { href: '/follow-ups',  label: 'Follow-ups',  icon: CalendarCheck },
   { href: '/tickets',     label: 'Tickets',     icon: Ticket },
+  { href: '/fareharbor',  label: 'FareHarbor',  icon: Plug },
   { href: '/templates',   label: 'Templates',   icon: FileText },
   { href: '/settings',    label: 'Definições',  icon: Settings },
 ]

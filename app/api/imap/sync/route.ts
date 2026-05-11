@@ -4,6 +4,7 @@ import { simpleParser, ParsedMail } from 'mailparser'
 import { createServiceClient } from '@/lib/supabase'
 import { analyzeAttachment } from '@/lib/analyze-attachment'
 import { decodeLegacyEmailContent, looksLikeLegacyEmail } from '@/lib/decode-legacy-email'
+import { isFhIntegrationEmail, parseFhIntegrationEmail } from '@/lib/fh-integration-parser'
 import { randomUUID } from 'crypto'
 
 export const dynamic = 'force-dynamic'
@@ -471,6 +472,10 @@ export async function GET(req: NextRequest) {
           const rawDate = msg.internalDate ?? parsed.date ?? new Date()
           const date    = rawDate instanceof Date ? rawDate : new Date(rawDate)
 
+          const fromForFh = fromList[0]?.address ?? primarySenderEmail
+          const isFh = isFhIntegrationEmail(fromForFh, subject, bodyText)
+          const fhParsed = isFh ? parseFhIntegrationEmail(bodyText) : null
+
           buffer.push({
             customer_id: customerId,
             type:        'email',
@@ -482,6 +487,7 @@ export async function GET(req: NextRequest) {
               matched_email: matchedEmail,
               parsed_version: 'mailparser-1',
               ...(bodyHtml ? { html: bodyHtml } : {}),
+              ...(isFh ? { fh_integration_request: true, fh_parsed: fhParsed } : {}),
             },
             is_read:     effectiveDirection === 'outbound',
             occurred_at: date.toISOString(),
