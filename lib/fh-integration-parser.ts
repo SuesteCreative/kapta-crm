@@ -11,8 +11,9 @@ export interface FhIntegrationParsed {
 
 const RE = {
   name:            /^[\s>]*(?:Name|Nome)\s*[:\-—]\s*(.+?)\s*$/im,
-  // Labelled shortname (line-anchored with separator)
-  shortname:       /^[\s>]*(?:FareHarbor\s+Shortname|FH\s+Shortname|Shortname)\s*[:\-—]\s*([A-Za-z0-9_-]+)\s*$/im,
+  // Labelled shortname (line-anchored with separator). Accept multi-word values
+  // (some users type names instead of URL-safe slugs) — capture everything till EOL.
+  shortname:       /^[\s>]*(?:FareHarbor\s+Shortname|FH\s+Shortname|Shortname)\s*[:\-—]\s*([^\r\n]+?)\s*$/im,
   // Same label but without a separator: "Shortname mallorcaseaparadise"
   shortnameNoSep:  /\b(?:FareHarbor\s+Shortname|FH\s+Shortname|Shortname)\s+([A-Za-z0-9_-]{3,})\b/i,
   // Inline URL: fareharbor.com/embeds/book/<shortname>/ or /api/external/v1/companies/<shortname>/

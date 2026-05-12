@@ -81,8 +81,11 @@ export default async function FareHarborPage() {
 
   candidates.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
 
-  const pending: PendingFhEmail[] = []
-  const seenSenderEmails = new Set<string>()
+  // Group candidates by sender email and MERGE parsed fields across all matches.
+  // First non-null wins per field — so an older form-template email with "Name: Antonia Grimalt"
+  // contributes the name, while the newest reply contributes the subject + interaction_id.
+  type Acc = PendingFhEmail & { _occurred_ms: number }
+  const bySender = new Map<string, Acc>()
 
   for (const row of candidates) {
     const md     = (row.metadata ?? {}) as Record<string, unknown>
@@ -92,36 +95,66 @@ export default async function FareHarborPage() {
 
     const customer = flattenCustomer(row.customers)
 
-    // Partner email: prefer the parsed body email; fallback to the customer's primary email identifier.
     const parsedEmail = ((parsedRaw.email as string | undefined) ?? '').toLowerCase().trim()
     const senderEmail = parsedEmail || primaryEmail(customer) || ''
-    const parsedShortname = ((parsedRaw.shortname as string | undefined) ?? '').trim()
-
-    if (!senderEmail) continue // can't identify partner
-    if (/@kapta\.pt$/i.test(senderEmail)) continue // skip internal
+    if (!senderEmail) continue
+    if (/@kapta\.pt$/i.test(senderEmail)) continue
     if (existingEmails.has(senderEmail)) continue
     if (customer?.id && existingCustomerIds.has(customer.id)) continue
-    if (seenSenderEmails.has(senderEmail)) continue
-    seenSenderEmails.add(senderEmail)
 
-    // Strip identifiers from forwarded_to_customer (the client only needs id/name/company)
     const fwCustomer = customer ? { id: customer.id, name: customer.name, company: customer.company } : null
+    const occurredMs = new Date(row.occurred_at).getTime()
+    const parsedName       = (parsedRaw.name as string | undefined)?.trim() || null
+    const parsedShortname  = (parsedRaw.shortname as string | undefined)?.trim() || null
+    const parsedCountry    = (parsedRaw.country as string | undefined)?.trim() || null
+    const parsedInvoicing  = (parsedRaw.invoicingSystem as string | undefined)?.trim() || null
+    const parsedAuth       = parsedRaw.authorization as boolean | undefined
 
-    pending.push({
-      interaction_id:    row.id,
-      occurred_at:       row.occurred_at,
-      subject:           row.subject,
-      name:              (parsedRaw.name as string | undefined) ?? customer?.name ?? null,
-      email:             senderEmail,
-      country:           (parsedRaw.country as string | undefined) ?? null,
-      invoicing_system:  (parsedRaw.invoicingSystem as string | undefined) ?? null,
-      shortname:         parsedShortname || null,
-      authorization:     (parsedRaw.authorization as boolean | undefined) ?? null,
-      parsed:            parsedRaw,
-      forwarded_to_customer: fwCustomer,
-      legacy:            !flagged,
-    })
+    const existing = bySender.get(senderEmail)
+    if (!existing) {
+      bySender.set(senderEmail, {
+        interaction_id:    row.id,
+        occurred_at:       row.occurred_at,
+        subject:           row.subject,
+        name:              parsedName ?? customer?.name ?? null,
+        email:             senderEmail,
+        country:           parsedCountry,
+        invoicing_system:  parsedInvoicing,
+        shortname:         parsedShortname,
+        authorization:     parsedAuth ?? null,
+        parsed:            parsedRaw,
+        forwarded_to_customer: fwCustomer,
+        legacy:            !flagged,
+        _occurred_ms:      occurredMs,
+      })
+      continue
+    }
+
+    // Newer than current? Bump interaction_id + subject + occurred_at (we want the latest thread state).
+    if (occurredMs > existing._occurred_ms) {
+      existing.interaction_id = row.id
+      existing.occurred_at    = row.occurred_at
+      existing.subject        = row.subject
+      existing._occurred_ms   = occurredMs
+      if (!existing.forwarded_to_customer) existing.forwarded_to_customer = fwCustomer
+      if (!existing.legacy && !flagged) existing.legacy = true
+    }
+
+    // Fill in any missing parsed fields from this candidate. First non-null wins overall;
+    // we only override when current is null.
+    if (!existing.name             && parsedName)      existing.name = parsedName
+    if (!existing.shortname        && parsedShortname) existing.shortname = parsedShortname
+    if (!existing.country          && parsedCountry)   existing.country = parsedCountry
+    if (!existing.invoicing_system && parsedInvoicing) existing.invoicing_system = parsedInvoicing
+    if (existing.authorization == null && parsedAuth !== undefined) existing.authorization = parsedAuth
+    // Merge parsed JSON shallowly (richer parsed wins per-key)
+    existing.parsed = { ...parsedRaw, ...existing.parsed }
   }
+
+  // Newest-first by latest interaction in the thread
+  const pending: PendingFhEmail[] = Array.from(bySender.values())
+    .sort((a, b) => b._occurred_ms - a._occurred_ms)
+    .map(({ _occurred_ms: _, ...rest }) => { void _; return rest })
 
   return <FhIntegrationsClient rows={integrationsRes.data ?? []} pending={pending} />
 }
