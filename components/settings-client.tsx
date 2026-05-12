@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
-import { Save, Eye, Code, Link2, Brain, Calendar } from 'lucide-react'
+import { Save, Eye, Code, Link2, Brain, Calendar, Users, Loader2 } from 'lucide-react'
 
 const DEFAULT_SIGNATURE_HTML = `<div style="font-family:Arial,Helvetica,sans-serif;color:#2d2d2d;font-size:13px;line-height:1.6;border-top:2px solid #c0272b;padding-top:14px;margin-top:8px;max-width:480px;">
 
@@ -60,6 +60,28 @@ export function SettingsClient({ initialSignature, initialMemory, initialCalendl
   const [mode, setMode] = useState<'preview' | 'code'>('preview')
   const [relinking, setRelinking] = useState(false)
   const [relinkPreview, setRelinkPreview] = useState<{ total: number; groups: number } | null>(null)
+  const [backfillingNames, setBackfillingNames] = useState(false)
+  const [backfillResult, setBackfillResult] = useState<{ updated: number; scanned: number; skipped: number; candidates: number } | null>(null)
+
+  async function handleBackfillNames() {
+    setBackfillingNames(true)
+    try {
+      const res = await fetch('/api/admin/backfill-customer-names', { method: 'POST' })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      setBackfillResult({
+        updated: json.updated ?? 0,
+        scanned: json.scanned ?? 0,
+        skipped: json.skipped ?? 0,
+        candidates: json.candidates ?? 0,
+      })
+      toast.success(`Atualizados ${json.updated} nomes de clientes.`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro.')
+    } finally {
+      setBackfillingNames(false)
+    }
+  }
 
   async function handleSaveCalendly() {
     setSavingCalendly(true)
@@ -261,6 +283,45 @@ export function SettingsClient({ initialSignature, initialMemory, initialCalendl
             {relinking ? 'A verificar…' : 'Verificar e corrigir'}
           </Button>
         )}
+      </div>
+
+{/* Backfill customer names card */}
+      <div
+        className="rounded-xl p-6 space-y-3"
+        style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}
+      >
+        <div className="flex items-start gap-2">
+          <Users className="h-4 w-4 mt-0.5" style={{ color: 'var(--primary)' }} />
+          <div>
+            <h2 className="text-[15px] font-semibold" style={{ color: 'var(--foreground)' }}>
+              Corrigir nomes de clientes
+            </h2>
+            <p className="text-[13px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+              Encontra clientes cujo nome ficou igual ao local-part do email (ex: "direccion", "info", "geral") e tenta extrair o nome real de linhas "From: Nome &lt;email&gt;" em emails encaminhados. Correr uma vez.
+            </p>
+          </div>
+        </div>
+
+        {backfillResult && (
+          <div className="rounded-md p-3 text-[12.5px]" style={{ background: 'rgba(45,185,117,0.08)', border: '1px solid rgba(45,185,117,0.25)' }}>
+            <p style={{ color: 'var(--status-active)', fontWeight: 600 }}>
+              Atualizados: {backfillResult.updated}
+            </p>
+            <p style={{ color: 'var(--muted-foreground)' }}>
+              {backfillResult.candidates} candidatos · {backfillResult.scanned} scanned · {backfillResult.skipped} sem signal
+            </p>
+          </div>
+        )}
+
+        <Button
+          onClick={handleBackfillNames}
+          disabled={backfillingNames}
+          variant="outline"
+          className="gap-2 rounded-lg text-[13px] font-medium"
+        >
+          {backfillingNames ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Users className="h-3.5 w-3.5" />}
+          {backfillingNames ? 'A processar…' : 'Correr backfill'}
+        </Button>
       </div>
 
       {/* Calendly card */}
