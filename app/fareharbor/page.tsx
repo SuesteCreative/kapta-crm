@@ -2,41 +2,85 @@ export const dynamic = 'force-dynamic'
 
 import { createServiceClient } from '@/lib/supabase'
 import { FhIntegrationsClient, type PendingFhEmail } from '@/components/fh-integrations-client'
+import { parseFhIntegrationEmail } from '@/lib/fh-integration-parser'
 
 export default async function FareHarborPage() {
   const supabase = createServiceClient()
 
-  const [integrationsRes, pendingRes] = await Promise.all([
+  // Pull active integrations + every email that looks like a FH form request.
+  // We accept BOTH paths:
+  //   (a) emails flagged by sync (metadata.fh_integration_request = true)
+  //   (b) legacy emails whose content matches the FH form template
+  //       (FareHarbor Shortname + Email lines) — parsed on the fly here.
+  // De-dupe by interaction id and drop any already linked to an fh_integration.
+  const [integrationsRes, flaggedRes, contentRes] = await Promise.all([
     supabase
       .from('fh_integrations')
       .select('*, customers(id, name, company)')
       .order('created_at', { ascending: false }),
     supabase
       .from('interactions')
-      .select('id, subject, occurred_at, customer_id, metadata, customers(id, name, company)')
+      .select('id, subject, content, occurred_at, customer_id, metadata, customers(id, name, company)')
       .eq('metadata->>fh_integration_request', 'true')
       .is('metadata->>fh_integration_id', null)
       .order('occurred_at', { ascending: false }),
+    supabase
+      .from('interactions')
+      .select('id, subject, content, occurred_at, customer_id, metadata, customers(id, name, company)')
+      .eq('type', 'email')
+      .ilike('content', '%FareHarbor Shortname:%')
+      .order('occurred_at', { ascending: false })
+      .limit(500),
   ])
 
-  // Shape pending rows: extract parsed fields so client doesn't need to know metadata structure.
-  const pending: PendingFhEmail[] = (pendingRes.data ?? []).map((row) => {
-    const md = (row.metadata ?? {}) as Record<string, unknown>
-    const parsed = (md.fh_parsed ?? {}) as Record<string, unknown>
-    const cust = (row as { customers?: { id: string; name: string; company: string | null } | { id: string; name: string; company: string | null }[] | null }).customers
+  type Raw = {
+    id: string
+    subject: string | null
+    content: string | null
+    occurred_at: string
+    metadata: Record<string, unknown> | null
+    customers?: { id: string; name: string; company: string | null } | { id: string; name: string; company: string | null }[] | null
+  }
+
+  const seen = new Set<string>()
+  const candidates: Raw[] = []
+  for (const r of (flaggedRes.data ?? []) as Raw[]) {
+    if (seen.has(r.id)) continue
+    seen.add(r.id); candidates.push(r)
+  }
+  for (const r of (contentRes.data ?? []) as Raw[]) {
+    if (seen.has(r.id)) continue
+    const md = (r.metadata ?? {}) as Record<string, unknown>
+    if (md.fh_integration_id) continue // already converted
+    seen.add(r.id); candidates.push(r)
+  }
+
+  // Sort newest-first
+  candidates.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
+
+  const pending: PendingFhEmail[] = candidates.map((row) => {
+    const md     = (row.metadata ?? {}) as Record<string, unknown>
+    const flagged = !!md.fh_integration_request
+    // Reuse the stored parse if sync did it; otherwise parse on the fly.
+    const parsedRaw = (md.fh_parsed as Record<string, unknown> | undefined)
+      ?? (parseFhIntegrationEmail(row.content) as unknown as Record<string, unknown>)
+
+    const cust = row.customers
     const customer = Array.isArray(cust) ? cust[0] ?? null : cust ?? null
+
     return {
-      interaction_id: row.id as string,
-      occurred_at:    row.occurred_at as string,
-      subject:        row.subject as string | null,
-      name:           (parsed.name as string | undefined) ?? null,
-      email:          (parsed.email as string | undefined) ?? null,
-      country:        (parsed.country as string | undefined) ?? null,
-      invoicing_system: (parsed.invoicingSystem as string | undefined) ?? null,
-      shortname:      (parsed.shortname as string | undefined) ?? null,
-      authorization:  (parsed.authorization as boolean | undefined) ?? null,
-      parsed,
+      interaction_id:    row.id,
+      occurred_at:       row.occurred_at,
+      subject:           row.subject,
+      name:              (parsedRaw.name as string | undefined) ?? null,
+      email:             (parsedRaw.email as string | undefined) ?? null,
+      country:           (parsedRaw.country as string | undefined) ?? null,
+      invoicing_system:  (parsedRaw.invoicingSystem as string | undefined) ?? null,
+      shortname:         (parsedRaw.shortname as string | undefined) ?? null,
+      authorization:     (parsedRaw.authorization as boolean | undefined) ?? null,
+      parsed:            parsedRaw,
       forwarded_to_customer: customer,
+      legacy:            !flagged,
     }
   })
 

@@ -30,6 +30,7 @@ export interface PendingFhEmail {
   authorization: boolean | null
   parsed: Record<string, unknown>
   forwarded_to_customer: { id: string; name: string; company: string | null } | null
+  legacy?: boolean
 }
 
 const STATUS_STYLES: Record<FhIntegrationStatus, { bg: string; text: string }> = {
