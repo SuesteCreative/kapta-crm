@@ -45,7 +45,7 @@ export function FhIntegrationDetailClient({ fh, sourceEmail }: Props) {
     email: fh.email,
     country: (fh.country ?? '') as '' | FhCountry,
     invoicing_system: fh.invoicing_system ?? '',
-    authorization: fh.authorization,
+    authorized: fh.authorized,
     fh_api_key: fh.fh_api_key ?? '',
     status: fh.status,
     notes: fh.notes ?? '',
@@ -68,7 +68,7 @@ export function FhIntegrationDetailClient({ fh, sourceEmail }: Props) {
           email: form.email.trim().toLowerCase(),
           country: form.country || null,
           invoicing_system: form.invoicing_system.trim() || null,
-          authorization: form.authorization,
+          authorized: form.authorized,
           fh_api_key: form.fh_api_key.trim() || null,
           status: form.status,
           notes: form.notes.trim() || null,
@@ -323,8 +323,8 @@ export function FhIntegrationDetailClient({ fh, sourceEmail }: Props) {
             <input
               id="fh-auth-detail"
               type="checkbox"
-              checked={form.authorization}
-              onChange={(e) => setForm({ ...form, authorization: e.target.checked })}
+              checked={form.authorized}
+              onChange={(e) => setForm({ ...form, authorized: e.target.checked })}
               className="h-4 w-4 rounded"
             />
             <Label htmlFor="fh-auth-detail" className="cursor-pointer">Autorização confirmada</Label>

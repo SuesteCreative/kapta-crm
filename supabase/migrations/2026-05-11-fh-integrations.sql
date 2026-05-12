@@ -12,7 +12,7 @@ create table if not exists fh_integrations (
   email                 text not null,
   country               text check (country in ('PT','ES','other')),
   invoicing_system      text,
-  authorization         boolean not null default false,
+  authorized            boolean not null default false,
   fh_api_key            text,
   status                text not null default 'new'
     check (status in ('new','onboarding','live','troubleshoot','follow_up','churned')),

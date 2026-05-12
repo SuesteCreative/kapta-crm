@@ -36,7 +36,7 @@ interface FormState {
   email: string
   country: '' | FhCountry
   invoicing_system: string
-  authorization: boolean
+  authorized: boolean
   fh_api_key: string
   status: FhIntegrationStatus
   notes: string
@@ -44,7 +44,7 @@ interface FormState {
 
 const EMPTY: FormState = {
   shortname: '', name: '', email: '', country: '',
-  invoicing_system: '', authorization: false, fh_api_key: '',
+  invoicing_system: '', authorized: false, fh_api_key: '',
   status: 'new', notes: '',
 }
 
@@ -72,7 +72,7 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
       email: prefill?.email ?? '',
       country: prefill?.country ?? '',
       invoicing_system: prefill?.invoicingSystem ?? '',
-      authorization: prefill?.authorization ?? false,
+      authorized: prefill?.authorization ?? false,
       fh_api_key: '',
       status: 'new',
       notes: '',
@@ -169,7 +169,7 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
           email: form.email.trim().toLowerCase(),
           country: form.country || null,
           invoicing_system: form.invoicing_system.trim() || null,
-          authorization: form.authorization,
+          authorized: form.authorized,
           fh_api_key: form.fh_api_key.trim() || null,
           status: form.status,
           notes: form.notes.trim() || null,
@@ -328,13 +328,13 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
 
           <div className="flex items-center gap-2">
             <input
-              id="fh-authorization"
+              id="fh-authorized"
               type="checkbox"
-              checked={form.authorization}
-              onChange={(e) => setForm({ ...form, authorization: e.target.checked })}
+              checked={form.authorized}
+              onChange={(e) => setForm({ ...form, authorized: e.target.checked })}
               className="h-4 w-4 rounded"
             />
-            <Label htmlFor="fh-authorization" className="cursor-pointer">
+            <Label htmlFor="fh-authorized" className="cursor-pointer">
               Autorização confirmada
             </Label>
           </div>

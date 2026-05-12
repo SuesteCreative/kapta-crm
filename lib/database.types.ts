@@ -185,7 +185,7 @@ export interface FhIntegration {
   email: string
   country: FhCountry | null
   invoicing_system: string | null
-  authorization: boolean
+  authorized: boolean
   fh_api_key: string | null
   status: FhIntegrationStatus
   customer_id: string | null

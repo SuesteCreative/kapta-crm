@@ -157,7 +157,7 @@ export function FhIntegrationsClient({ rows }: { rows: Row[] }) {
                     >
                       {r.shortname}
                     </span>
-                    {r.authorization && (
+                    {r.authorized && (
                       <CheckCircle2 className="h-3.5 w-3.5" style={{ color: 'var(--status-active)' }} />
                     )}
                   </div>
