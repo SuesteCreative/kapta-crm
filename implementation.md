@@ -20,5 +20,16 @@
 
 ### Low
 
-- [ ] **#6 Local dev keys.** Pedro task only. Supabase Dashboard → Settings → API → regen `sb_publishable_*` + `sb_secret_*`. Update `.env.local` + Vercel env vars. No code.
+- [x] **#6 Local dev keys** — instructions documented (Pedro task, no code).
+
+  Steps:
+  1. Supabase Dashboard → Settings → API → Generate new API keys (`sb_publishable_*` + `sb_secret_*`).
+  2. Update `kapta-crm/.env.local`:
+     ```
+     NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
+     SUPABASE_SERVICE_ROLE_KEY=sb_secret_...
+     ```
+  3. Vercel project → Settings → Environment Variables → update same two keys → Redeploy.
+  4. `npm run dev` locally — should now talk to DB.
+
 - [ ] **#4 FH API real integration.** Deferred until 5+ live partners. Separate phase later.
