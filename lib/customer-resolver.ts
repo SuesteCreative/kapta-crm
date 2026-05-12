@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import type { FhIntegrationStatus, FhCountry } from './database.types'
 
 const PERSONAL_DOMAINS = new Set([
   'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.co.uk', 'hotmail.fr',
@@ -185,4 +186,75 @@ export async function resolveOrCreateCustomerForFh(input: ResolveCustomerInput):
   })
 
   return { customer_id: customerId, created_customer: true, company }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Convert a pending FH email (interaction with parsed metadata) into an
+// fh_integrations row. Auto-resolves customer + company. Links source email.
+// Used by /fareharbor list when Pedro clicks a "Por contactar" row.
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface ConvertPendingInput {
+  source_interaction_id: string
+  name: string
+  email: string
+  shortname: string
+  country: FhCountry | null
+  invoicing_system: string | null
+  authorized: boolean
+  status?: FhIntegrationStatus
+  /** When the email's domain is personal, this is the fallback company name (title-cased shortname). */
+  fallback_company_name?: string
+}
+
+export async function convertPendingToIntegration(input: ConvertPendingInput): Promise<{ fh_integration_id: string }> {
+  const email = input.email.toLowerCase().trim()
+  if (!email || !input.shortname.trim()) {
+    throw new Error('Email e shortname são obrigatórios.')
+  }
+
+  // Pre-resolution: if a pending email's parsed email is already a customer, link silently.
+  // For personal domains where derivation returns null, pass the shortname guess as override.
+  const personalFallback = isPersonalDomain(email) && input.fallback_company_name?.trim()
+    ? { name: input.fallback_company_name!.trim(), domain: null as string | null }
+    : null
+
+  const resolved = await resolveOrCreateCustomerForFh({
+    email,
+    contactName: input.name,
+    companyOverride: personalFallback,
+  })
+
+  const { data: fh, error: fhErr } = await supabase
+    .from('fh_integrations')
+    .insert({
+      shortname: input.shortname.trim(),
+      name: input.name.trim() || email.split('@')[0],
+      email,
+      country: input.country,
+      invoicing_system: input.invoicing_system,
+      authorized: input.authorized,
+      fh_api_key: null,
+      status: input.status ?? 'new',
+      customer_id: resolved.customer_id,
+      source_interaction_id: input.source_interaction_id,
+      notes: null,
+      last_contact_at: null,
+    })
+    .select('id')
+    .single()
+
+  if (fhErr || !fh) throw new Error(fhErr?.message || 'Erro ao criar integração.')
+  const newId = fh.id as string
+
+  // Back-link the source email
+  const { data: existing } = await supabase
+    .from('interactions')
+    .select('metadata')
+    .eq('id', input.source_interaction_id)
+    .maybeSingle()
+  const merged = { ...(existing?.metadata ?? {}), fh_integration_id: newId }
+  await supabase.from('interactions').update({ metadata: merged }).eq('id', input.source_interaction_id)
+
+  return { fh_integration_id: newId }
 }

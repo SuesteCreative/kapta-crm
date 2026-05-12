@@ -19,6 +19,7 @@ import {
 } from '@/lib/database.types'
 import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
 import { FhIntegrationDialog } from '@/components/fh-integration-dialog'
+import { convertPendingToIntegration, shortnameToCompanyGuess } from '@/lib/customer-resolver'
 
 type Row = FhIntegration & {
   customers: { id: string; name: string; company: string | null } | null
@@ -67,6 +68,7 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [statusSaving, setStatusSaving] = useState<Record<string, boolean>>({})
   const [aiSuggesting, setAiSuggesting] = useState<Record<string, boolean>>({})
+  const [converting, setConverting] = useState<Record<string, boolean>>({})
 
   const q = search.trim().toLowerCase()
 
@@ -125,6 +127,38 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
     }
     setDialogCtx({ sourceId: p.interaction_id, prefill })
     setDialogOpen(true)
+  }
+
+  // Auto-create integration from a pending row + redirect to detail page.
+  // If data is incomplete (no email or shortname), fall back to the dialog.
+  async function convertPending(p: PendingFhEmail, status: FhIntegrationStatus = 'new') {
+    if (!p.email || !p.shortname) {
+      openPendingDialog(p)
+      return
+    }
+    setConverting((s) => ({ ...s, [p.interaction_id]: true }))
+    try {
+      const country: FhCountry | null =
+        p.country?.toUpperCase() === 'PT' ? 'PT' :
+        p.country?.toUpperCase() === 'ES' ? 'ES' :
+        p.country ? 'other' : null
+
+      const { fh_integration_id } = await convertPendingToIntegration({
+        source_interaction_id: p.interaction_id,
+        name: p.name ?? '',
+        email: p.email,
+        shortname: p.shortname,
+        country,
+        invoicing_system: p.invoicing_system,
+        authorized: p.authorization ?? false,
+        status,
+        fallback_company_name: shortnameToCompanyGuess(p.shortname),
+      })
+      router.push(`/fareharbor/${fh_integration_id}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao converter.')
+      setConverting((s) => ({ ...s, [p.interaction_id]: false }))
+    }
   }
 
   async function changeStatus(rowId: string, next: FhIntegrationStatus) {
@@ -233,61 +267,84 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
           collapsed={collapsed['__pending'] ?? false}
           onToggle={() => toggleSection('__pending')}
         >
-          {filteredPending.map((p) => (
-            <button
-              key={p.interaction_id}
-              onClick={() => openPendingDialog(p)}
-              className="block w-full text-left rounded-xl p-5 transition-colors hover:opacity-95"
-              style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: `1px solid ${PENDING_STYLE.text}33` }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0 space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-semibold text-[14px]" style={{ color: 'var(--foreground)' }}>
-                      {p.name ?? '(sem nome)'}
-                    </p>
-                    {p.shortname && (
-                      <span
-                        className="text-[11px] font-mono rounded px-1.5 py-px"
-                        style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
-                      >
-                        {p.shortname}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>
-                    {p.email ?? '—'}
-                  </p>
-                  <div className="flex flex-wrap gap-2 mt-1.5 text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
-                    {p.country && (
-                      <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
-                        {p.country.toUpperCase() === 'PT' ? 'Portugal'
-                          : p.country.toUpperCase() === 'ES' ? 'Espanha'
-                          : p.country}
-                      </span>
-                    )}
-                    {p.invoicing_system && (
-                      <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
-                        {p.invoicing_system}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span
-                    className="inline-flex items-center gap-1 text-[11.5px] font-medium rounded-full px-2.5 py-0.5"
-                    style={{ background: PENDING_STYLE.bg, color: PENDING_STYLE.text }}
+          {filteredPending.map((p) => {
+            const isConverting = converting[p.interaction_id]
+            return (
+              <div
+                key={p.interaction_id}
+                className="rounded-xl p-5 transition-colors"
+                style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: `1px solid ${PENDING_STYLE.text}33` }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <button
+                    onClick={() => convertPending(p, 'new')}
+                    disabled={isConverting}
+                    className="flex-1 min-w-0 space-y-1 text-left hover:opacity-90 disabled:opacity-60"
+                    title="Abrir ficha (cria integração e abre detalhe)"
                   >
-                    <AlertCircle className="h-3 w-3" />
-                    Por contactar
-                  </span>
-                  <span className="text-[11px] tabular-nums" style={{ color: 'var(--muted-foreground)' }}>
-                    {formatDate(p.occurred_at)}
-                  </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-[14px]" style={{ color: 'var(--foreground)' }}>
+                        {p.name ?? '(sem nome)'}
+                      </p>
+                      {p.shortname && (
+                        <span
+                          className="text-[11px] font-mono rounded px-1.5 py-px"
+                          style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                        >
+                          {p.shortname}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>
+                      {p.email ?? '—'}
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-1.5 text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
+                      {p.country && (
+                        <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
+                          {p.country.toUpperCase() === 'PT' ? 'Portugal'
+                            : p.country.toUpperCase() === 'ES' ? 'Espanha'
+                            : p.country}
+                        </span>
+                      )}
+                      {p.invoicing_system && (
+                        <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
+                          {p.invoicing_system}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                  <div className="flex flex-col items-end gap-1.5 shrink-0">
+                    <Select
+                      value="__pending__"
+                      onValueChange={(v) => {
+                        if (v === '__pending__') return
+                        convertPending(p, v as FhIntegrationStatus)
+                      }}
+                      disabled={isConverting}
+                    >
+                      <SelectTrigger
+                        className="h-7 text-[11.5px] w-44 rounded-full border-0 font-medium px-3 inline-flex items-center gap-1"
+                        style={{ background: PENDING_STYLE.bg, color: PENDING_STYLE.text }}
+                      >
+                        {isConverting
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : <><AlertCircle className="h-3 w-3" /> Por contactar</>}
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__pending__" disabled>Por contactar</SelectItem>
+                        {FH_STATUS_ORDER.map((s) => (
+                          <SelectItem key={s} value={s}>→ {FH_STATUS_LABELS[s]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-[11px] tabular-nums" style={{ color: 'var(--muted-foreground)' }}>
+                      {formatDate(p.occurred_at)}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </button>
-          ))}
+            )
+          })}
         </AccordionSection>
       )}
 
