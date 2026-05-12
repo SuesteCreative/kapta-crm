@@ -11,8 +11,12 @@ export interface FhIntegrationParsed {
 
 const RE = {
   name:            /^[\s>]*(?:Name|Nome)\s*[:\-—]\s*(.+?)\s*$/im,
-  // Strict: FareHarbor Shortname. Loose fallback below.
+  // Labelled shortname (line-anchored with separator)
   shortname:       /^[\s>]*(?:FareHarbor\s+Shortname|FH\s+Shortname|Shortname)\s*[:\-—]\s*([A-Za-z0-9_-]+)\s*$/im,
+  // Same label but without a separator: "Shortname mallorcaseaparadise"
+  shortnameNoSep:  /\b(?:FareHarbor\s+Shortname|FH\s+Shortname|Shortname)\s+([A-Za-z0-9_-]{3,})\b/i,
+  // Inline URL: fareharbor.com/embeds/book/<shortname>/ or /api/external/v1/companies/<shortname>/
+  shortnameUrl:    /fareharbor\.com\/(?:embeds\/book|api\/external\/v\d+\/companies)\/([A-Za-z0-9_-]+)\/?/i,
   email:           /^[\s>]*(?:Email|E[\- ]?mail)\s*[:\-—]\s*([^\s<>]+@[^\s<>]+)\s*$/im,
   country:         /^[\s>]*(?:Country|País|Pais)\s*[:\-—]\s*([A-Za-z]{2,})\s*$/im,
   invoicingSystem: /^[\s>]*(?:Invoicing\s+System|Sistema\s+de\s+factura(?:ção|cao)|Sistema\s+de\s+faturação)\s*[:\-—]\s*(.+?)\s*$/im,
@@ -37,7 +41,10 @@ export function parseFhIntegrationEmail(body: string | null | undefined): FhInte
   if (!body) return {}
 
   const name             = body.match(RE.name)?.[1]?.trim()
-  const shortname        = body.match(RE.shortname)?.[1]?.trim()
+  // Try labelled (with sep) → labelled (no sep) → embedded URL. First hit wins.
+  const shortname        = (body.match(RE.shortname)?.[1]
+                          ?? body.match(RE.shortnameNoSep)?.[1]
+                          ?? body.match(RE.shortnameUrl)?.[1])?.trim()
   const email            = body.match(RE.email)?.[1]?.toLowerCase().trim()
   const explicitCountry  = normalizeCountry(body.match(RE.country)?.[1])
   const invoicingSystem  = body.match(RE.invoicingSystem)?.[1]?.trim()

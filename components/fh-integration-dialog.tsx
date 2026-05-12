@@ -235,7 +235,7 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
               <Input
                 value={form.shortname}
                 onChange={(e) => setForm({ ...form, shortname: e.target.value })}
-                placeholder="naturemeetings"
+                placeholder="shortname"
               />
             </div>
             <div className="space-y-1.5">
