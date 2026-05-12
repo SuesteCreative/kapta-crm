@@ -42,6 +42,16 @@ export default async function FareHarborPage() {
     customers?: { id: string; name: string; company: string | null } | { id: string; name: string; company: string | null }[] | null
   }
 
+  // Build dedup sets from existing integrations:
+  // (1) emails — any pending whose parsed email matches an integration is dropped
+  // (2) customer_ids — any pending whose linked customer already has an integration is dropped
+  const existingEmails = new Set<string>()
+  const existingCustomerIds = new Set<string>()
+  for (const i of integrationsRes.data ?? []) {
+    if (i.email) existingEmails.add(i.email.toLowerCase().trim())
+    if (i.customer_id) existingCustomerIds.add(i.customer_id)
+  }
+
   const seen = new Set<string>()
   const candidates: Raw[] = []
   for (const r of (flaggedRes.data ?? []) as Raw[]) {
@@ -58,17 +68,28 @@ export default async function FareHarborPage() {
   // Sort newest-first
   candidates.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
 
-  const pending: PendingFhEmail[] = candidates.map((row) => {
+  const pending: PendingFhEmail[] = []
+  const seenEmails = new Set<string>()
+
+  for (const row of candidates) {
     const md     = (row.metadata ?? {}) as Record<string, unknown>
     const flagged = !!md.fh_integration_request
-    // Reuse the stored parse if sync did it; otherwise parse on the fly.
     const parsedRaw = (md.fh_parsed as Record<string, unknown> | undefined)
       ?? (parseFhIntegrationEmail(row.content) as unknown as Record<string, unknown>)
 
-    const cust = row.customers
+    const cust = (row as Raw).customers
     const customer = Array.isArray(cust) ? cust[0] ?? null : cust ?? null
 
-    return {
+    const parsedEmail = ((parsedRaw.email as string | undefined) ?? '').toLowerCase().trim()
+
+    // Dedup against existing integrations
+    if (parsedEmail && existingEmails.has(parsedEmail)) continue
+    if (customer?.id && existingCustomerIds.has(customer.id)) continue
+    // Dedup pending candidates with the same parsed email (multiple forwards of same request)
+    if (parsedEmail && seenEmails.has(parsedEmail)) continue
+    if (parsedEmail) seenEmails.add(parsedEmail)
+
+    pending.push({
       interaction_id:    row.id,
       occurred_at:       row.occurred_at,
       subject:           row.subject,
@@ -81,8 +102,8 @@ export default async function FareHarborPage() {
       parsed:            parsedRaw,
       forwarded_to_customer: customer,
       legacy:            !flagged,
-    }
-  })
+    })
+  }
 
   return <FhIntegrationsClient rows={integrationsRes.data ?? []} pending={pending} />
 }

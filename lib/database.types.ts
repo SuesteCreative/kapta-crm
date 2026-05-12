@@ -162,7 +162,9 @@ export interface Ticket {
   updated_at: string
 }
 
-export type FhIntegrationStatus = 'new' | 'onboarding' | 'live' | 'troubleshoot' | 'follow_up' | 'churned'
+export type FhIntegrationStatus =
+  | 'new' | 'onboarding' | 'api_received' | 'integration_done'
+  | 'live' | 'troubleshoot' | 'follow_up' | 'churned'
 export type FhCountry = 'PT' | 'ES' | 'other'
 
 export const FH_INVOICING_SYSTEMS_PT = ['IGEST', 'Moloni', 'InvoiceXpress'] as const
@@ -170,13 +172,21 @@ export const FH_INVOICING_SYSTEMS_ES = ['Holded', 'Billin', 'Sage'] as const
 export const FH_INVOICING_SYSTEMS = [...FH_INVOICING_SYSTEMS_PT, ...FH_INVOICING_SYSTEMS_ES, 'Outro'] as const
 
 export const FH_STATUS_LABELS: Record<FhIntegrationStatus, string> = {
-  new:          'Novo',
-  onboarding:   'Onboarding',
-  live:         'Em produção',
-  troubleshoot: 'Troubleshoot',
-  follow_up:    'Follow-up',
-  churned:      'Churned',
+  new:              'Novo',
+  onboarding:       'Onboarding',
+  api_received:     'API recebida',
+  integration_done: 'Integração completa',
+  live:             'Em produção',
+  troubleshoot:     'Troubleshoot',
+  follow_up:        'Follow-up',
+  churned:          'Churned',
 }
+
+// Ordered for accordion display
+export const FH_STATUS_ORDER: FhIntegrationStatus[] = [
+  'new', 'onboarding', 'api_received', 'integration_done',
+  'live', 'troubleshoot', 'follow_up', 'churned',
+]
 
 export interface FhIntegration {
   id: string

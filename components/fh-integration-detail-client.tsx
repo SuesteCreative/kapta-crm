@@ -22,7 +22,7 @@ import { FollowUpDialog } from '@/components/follow-up-dialog'
 import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
 import {
-  FH_STATUS_LABELS, FH_INVOICING_SYSTEMS,
+  FH_STATUS_LABELS, FH_STATUS_ORDER, FH_INVOICING_SYSTEMS,
   type FhIntegration, type FhIntegrationStatus, type FhCountry,
   type Interaction, type CustomerIdentifier,
 } from '@/lib/database.types'
@@ -134,9 +134,20 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
 
   const threadItems = useMemo(() => groupTimeline(interactions), [interactions])
 
+  // Auto-progression: bump status forward only — never regress past Pedro's manual choice.
+  function autoBump(current: FhIntegrationStatus, target: FhIntegrationStatus): FhIntegrationStatus {
+    const ci = FH_STATUS_ORDER.indexOf(current)
+    const ti = FH_STATUS_ORDER.indexOf(target)
+    return ti > ci ? target : current
+  }
+
   async function handleSave() {
     setSaving(true)
     try {
+      // Auto-bump to api_received when API key is first pasted and status is still early.
+      const hasKey = form.fh_api_key.trim().length > 0
+      const nextStatus = hasKey ? autoBump(form.status, 'api_received') : form.status
+
       const { error } = await supabase
         .from('fh_integrations')
         .update({
@@ -147,13 +158,14 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
           invoicing_system: form.invoicing_system.trim() || null,
           authorized: form.authorized,
           fh_api_key: form.fh_api_key.trim() || null,
-          status: form.status,
+          status: nextStatus,
           notes: form.notes.trim() || null,
           last_contact_at: form.last_contact_at || null,
         })
         .eq('id', fh.id)
       if (error) throw error
-      toast.success('Guardado!')
+      if (nextStatus !== form.status) setForm((f) => ({ ...f, status: nextStatus }))
+      toast.success(nextStatus !== form.status ? `Guardado · estado → ${FH_STATUS_LABELS[nextStatus]}` : 'Guardado!')
       router.refresh()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao guardar.')
@@ -185,11 +197,13 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
     setMarkingIntegration(true)
     try {
       const nowIso = new Date().toISOString()
+      const nextStatus = autoBump(form.status, 'integration_done')
       const { error } = await supabase
         .from('fh_integrations')
-        .update({ integration_completed_at: nowIso })
+        .update({ integration_completed_at: nowIso, status: nextStatus })
         .eq('id', fh.id)
       if (error) throw error
+      setForm((f) => ({ ...f, status: nextStatus }))
       toast.success('Integração marcada como concluída.')
       router.refresh()
     } catch (e) {
@@ -304,14 +318,16 @@ Pedro`)
   }
 
   async function handleSent() {
-    // Only the onboarding flow updates the checklist timestamp.
+    // Only the onboarding flow updates the checklist timestamp + bumps status.
     if (sendMode !== 'onboarding') { router.refresh(); return }
     try {
       const nowIso = new Date().toISOString()
+      const nextStatus = autoBump(form.status, 'onboarding')
       await supabase
         .from('fh_integrations')
-        .update({ onboarding_email_sent_at: nowIso, last_contact_at: nowIso })
+        .update({ onboarding_email_sent_at: nowIso, last_contact_at: nowIso, status: nextStatus })
         .eq('id', fh.id)
+      if (nextStatus !== form.status) setForm((f) => ({ ...f, status: nextStatus }))
       router.refresh()
     } catch {
       // Send already succeeded; checklist tick is best-effort.
