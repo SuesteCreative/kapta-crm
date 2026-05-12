@@ -48,7 +48,8 @@ const STATUS_STYLES: Record<FhIntegrationStatus, { bg: string; text: string }> =
   live:             { bg: 'rgba(45,185,117,0.12)', text: '#1a9e6c' },
   troubleshoot:     { bg: 'rgba(229,72,77,0.1)',   text: '#C0272B' },
   follow_up:        { bg: 'rgba(59,130,246,0.1)',  text: '#1d4ed8' },
-  churned:          { bg: 'rgba(156,163,175,0.1)', text: '#6B7280' },
+  personalizado:    { bg: 'rgba(168,85,247,0.10)', text: '#7c3aed' },
+  lixo:             { bg: 'rgba(156,163,175,0.1)', text: '#6B7280' },
 }
 
 const PENDING_STYLE = { bg: 'rgba(229,72,77,0.10)', text: '#C0272B' }
@@ -104,7 +105,7 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
   const byStatus = useMemo(() => {
     const m: Record<FhIntegrationStatus, Row[]> = {
       new: [], onboarding: [], api_received: [], integration_done: [],
-      live: [], troubleshoot: [], follow_up: [], churned: [],
+      live: [], troubleshoot: [], follow_up: [], personalizado: [], lixo: [],
     }
     for (const r of filteredIntegrations) m[r.status].push(r)
     return m

@@ -15,7 +15,8 @@ States:
 - live             : in production
 - troubleshoot     : active issue
 - follow_up        : awaiting reply
-- churned          : abandoned / declined
+- personalizado    : custom / non-standard FH setup
+- lixo             : abandoned / declined / spam
 
 Output JSON only: {"status":"<one of above>","reason":"one short caveman sentence (max 12 words, Portuguese)"}
 No fluff. No hedging. No markdown.`
@@ -33,7 +34,7 @@ function stripHtml(html: string): string {
 
 const VALID_STATUSES = new Set([
   'new', 'onboarding', 'api_received', 'integration_done',
-  'live', 'troubleshoot', 'follow_up', 'churned',
+  'live', 'troubleshoot', 'follow_up', 'personalizado', 'lixo',
 ])
 
 export async function POST(req: Request) {

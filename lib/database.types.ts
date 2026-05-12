@@ -164,7 +164,7 @@ export interface Ticket {
 
 export type FhIntegrationStatus =
   | 'new' | 'onboarding' | 'api_received' | 'integration_done'
-  | 'live' | 'troubleshoot' | 'follow_up' | 'churned'
+  | 'live' | 'troubleshoot' | 'follow_up' | 'personalizado' | 'lixo'
 export type FhCountry = 'PT' | 'ES' | 'other'
 
 export const FH_INVOICING_SYSTEMS_PT = ['IGEST', 'Moloni', 'InvoiceXpress', 'Vendus'] as const
@@ -188,13 +188,14 @@ export const FH_STATUS_LABELS: Record<FhIntegrationStatus, string> = {
   live:             'Em produção',
   troubleshoot:     'Troubleshoot',
   follow_up:        'Follow-up',
-  churned:          'Churned',
+  personalizado:    'Personalizado',
+  lixo:             'Lixo',
 }
 
 // Ordered for accordion display
 export const FH_STATUS_ORDER: FhIntegrationStatus[] = [
   'new', 'onboarding', 'api_received', 'integration_done',
-  'live', 'troubleshoot', 'follow_up', 'churned',
+  'live', 'troubleshoot', 'follow_up', 'personalizado', 'lixo',
 ]
 
 export interface FhIntegration {

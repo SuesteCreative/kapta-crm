@@ -9,13 +9,12 @@
 -- ============================================================
 
 update customers c
-set name = (i.metadata->'fh_parsed'->>'name'),
+set name = i.metadata->'fh_parsed'->>'name',
     updated_at = now()
-from interactions i
-join customer_identifiers ci
-  on ci.customer_id = c.id
- and ci.type = 'email'
+from interactions i, customer_identifiers ci
 where i.customer_id = c.id
+  and ci.customer_id = c.id
+  and ci.type = 'email'
   and i.metadata->'fh_parsed'->>'name' is not null
   and length(trim(i.metadata->'fh_parsed'->>'name')) > 0
   and (
