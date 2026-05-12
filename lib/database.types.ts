@@ -204,6 +204,7 @@ export interface FhIntegration {
   last_contact_at: string | null
   onboarding_email_sent_at: string | null
   integration_completed_at: string | null
+  live_at: string | null
   created_at: string
   updated_at: string
 }

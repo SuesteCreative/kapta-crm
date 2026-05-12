@@ -13,7 +13,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import { formatDateTime } from '@/lib/utils'
@@ -174,17 +173,35 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
     }
   }
 
-  async function markOnboarded() {
+  async function markLive() {
     const nowIso = new Date().toISOString()
+    setSaving(true)
+    try {
+      const nextStatus = autoBump(form.status, 'live')
+      const { error } = await supabase
+        .from('fh_integrations')
+        .update({ live_at: nowIso, status: nextStatus, last_contact_at: nowIso })
+        .eq('id', fh.id)
+      if (error) throw error
+      setForm((f) => ({ ...f, status: nextStatus, last_contact_at: nowIso }))
+      toast.success('Marcado em produção.')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function unsetLive() {
     setSaving(true)
     try {
       const { error } = await supabase
         .from('fh_integrations')
-        .update({ status: 'live', last_contact_at: nowIso })
+        .update({ live_at: null })
         .eq('id', fh.id)
       if (error) throw error
-      setForm((f) => ({ ...f, status: 'live', last_contact_at: nowIso }))
-      toast.success('Marcado como em produção.')
+      toast.success('Produção desmarcada.')
       router.refresh()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro.')
@@ -210,6 +227,40 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
       toast.error(e instanceof Error ? e.message : 'Erro.')
     } finally {
       setMarkingIntegration(false)
+    }
+  }
+
+  async function unsetIntegrationDone() {
+    setMarkingIntegration(true)
+    try {
+      const { error } = await supabase
+        .from('fh_integrations')
+        .update({ integration_completed_at: null })
+        .eq('id', fh.id)
+      if (error) throw error
+      toast.success('Integração desmarcada.')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro.')
+    } finally {
+      setMarkingIntegration(false)
+    }
+  }
+
+  async function unsetOnboardingSent() {
+    setSaving(true)
+    try {
+      const { error } = await supabase
+        .from('fh_integrations')
+        .update({ onboarding_email_sent_at: null })
+        .eq('id', fh.id)
+      if (error) throw error
+      toast.success('Email de onboarding desmarcado.')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro.')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -369,7 +420,7 @@ Pedro`)
     : ''
 
   const apiKeyReceivedAt = form.fh_api_key.trim().length > 0 ? fh.updated_at : null
-  const liveAt = form.status === 'live' ? (fh.last_contact_at ?? null) : null
+  const liveAt = fh.live_at
 
   const allEmails: EmailContact[] = fh.customers?.customer_identifiers
     ?.filter((i) => i.type === 'email')
@@ -406,13 +457,22 @@ Pedro`)
       {/* Action bar */}
       <div className="flex flex-wrap gap-2">
         <Button
-          onClick={markOnboarded}
-          disabled={saving || form.status === 'live'}
+          onClick={openCompose}
+          disabled={!fh.customer_id}
           className="gap-1.5"
-          style={{ background: 'rgba(45,185,117,0.15)', color: '#1a9e6c' }}
         >
-          <CheckCircle2 className="h-4 w-4" />
-          Marcar em produção
+          <Send className="h-4 w-4" />
+          Enviar email
+        </Button>
+        <Button
+          onClick={openOnboarding}
+          disabled={!fh.customer_id}
+          variant="outline"
+          className="gap-1.5"
+          title="Enviar email com template de onboarding"
+        >
+          <Mail className="h-4 w-4" />
+          Email onboarding
         </Button>
         {!fh.customer_id && (
           <Button
@@ -434,7 +494,7 @@ Pedro`)
           title={fh.customer_id ? 'Agendar follow-up' : 'Liga primeiro um cliente'}
         >
           <CalendarCheck className="h-4 w-4" />
-          Agendar follow-up
+          Follow-up
         </Button>
         <div className="flex-1" />
         <Button onClick={handleDelete} disabled={deleting} variant="outline" className="gap-1.5" style={{ color: '#C0272B' }}>
@@ -459,18 +519,43 @@ Pedro`)
         integrationDoneAt={fh.integration_completed_at}
         liveAt={liveAt}
         onSendOnboarding={openOnboarding}
+        onUnsetEmailSent={unsetOnboardingSent}
         onMarkIntegrationDone={markIntegrationDone}
+        onUnsetIntegrationDone={unsetIntegrationDone}
+        onMarkLive={markLive}
+        onUnsetLive={unsetLive}
         markingIntegration={markingIntegration}
+        saving={saving}
         canSend={!!fh.customer_id}
       />
 
-      <Tabs defaultValue="ficha" className="w-full">
-        <TabsList>
-          <TabsTrigger value="ficha">Ficha</TabsTrigger>
-          <TabsTrigger value="timeline">Timeline · {interactions.length}</TabsTrigger>
-        </TabsList>
+      {/* Status dropdown — independent of checklist timestamps */}
+      <div className="flex items-center gap-2">
+        <Label className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>Estado de trabalho:</Label>
+        <Select
+          value={form.status}
+          onValueChange={async (v) => {
+            const next = v as FhIntegrationStatus
+            setForm((f) => ({ ...f, status: next }))
+            try {
+              await supabase.from('fh_integrations').update({ status: next }).eq('id', fh.id)
+              toast.success(`Estado → ${FH_STATUS_LABELS[next]}`)
+              router.refresh()
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : 'Erro.')
+            }
+          }}
+        >
+          <SelectTrigger className="h-8 w-44 text-[12px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {(Object.keys(FH_STATUS_LABELS) as FhIntegrationStatus[]).map((s) => (
+              <SelectItem key={s} value={s}>{FH_STATUS_LABELS[s]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
-        <TabsContent value="ficha" className="mt-4 space-y-6">
+      <div className="space-y-6">
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -606,24 +691,16 @@ Pedro`)
               )}
             </div>
           )}
-        </TabsContent>
 
-        <TabsContent value="timeline" className="mt-4 space-y-3">
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={openCompose} disabled={!fh.customer_id} className="gap-1.5">
-              <Send className="h-4 w-4" /> Enviar email
-            </Button>
-            <Button onClick={openOnboarding} disabled={!fh.customer_id} variant="outline" className="gap-1.5">
-              <Mail className="h-4 w-4" /> Enviar email de onboarding
-            </Button>
-            {!fh.customer_id && (
-              <span className="text-[11.5px] self-center" style={{ color: 'var(--muted-foreground)' }}>
-                Liga primeiro um cliente para enviar emails.
-              </span>
-            )}
-          </div>
+        {/* Timeline header */}
+        <div className="flex items-center gap-2 pt-2">
+          <Mail className="h-4 w-4" style={{ color: 'var(--primary)' }} />
+          <p className="text-[13px] font-semibold" style={{ color: 'var(--foreground)' }}>
+            Timeline · {interactions.length}
+          </p>
+        </div>
 
-          {threadItems.length === 0 && (
+        {threadItems.length === 0 && (
             <div className="rounded-xl p-10 text-center" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
               <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>Sem interações ainda.</p>
             </div>
@@ -682,8 +759,7 @@ Pedro`)
               </div>
             )
           })}
-        </TabsContent>
-      </Tabs>
+      </div>
 
       {fh.customer_id && (
         <FollowUpDialog
@@ -720,75 +796,100 @@ Pedro`)
 
 function OnboardingChecklist({
   emailSentAt, apiKeyReceivedAt, integrationDoneAt, liveAt,
-  onSendOnboarding, onMarkIntegrationDone, markingIntegration, canSend,
+  onSendOnboarding, onUnsetEmailSent,
+  onMarkIntegrationDone, onUnsetIntegrationDone,
+  onMarkLive, onUnsetLive,
+  markingIntegration, saving, canSend,
 }: {
   emailSentAt: string | null
   apiKeyReceivedAt: string | null
   integrationDoneAt: string | null
   liveAt: string | null
   onSendOnboarding: () => void
+  onUnsetEmailSent: () => void
   onMarkIntegrationDone: () => void
+  onUnsetIntegrationDone: () => void
+  onMarkLive: () => void
+  onUnsetLive: () => void
   markingIntegration: boolean
+  saving: boolean
   canSend: boolean
 }) {
-  const steps = [
-    { key: 'email',  icon: Mail,    label: 'Email de onboarding enviado',  at: emailSentAt },
-    { key: 'api',    icon: Key,     label: 'API key recebida',             at: apiKeyReceivedAt },
-    { key: 'int',    icon: Wrench,  label: 'Integração técnica concluída', at: integrationDoneAt },
-    { key: 'live',   icon: Rocket,  label: 'Em produção',                  at: liveAt },
-  ] as const
-
-  // Find next pending step (first one without `at`)
-  const nextIdx = steps.findIndex((s) => !s.at)
+  type Step = {
+    key: 'email' | 'api' | 'int' | 'live'
+    icon: typeof Mail
+    label: string
+    at: string | null
+    mark?: () => void
+    unset?: () => void
+    markLabel?: string
+    markDisabled?: boolean
+  }
+  const steps: Step[] = [
+    { key: 'email', icon: Mail,   label: 'Email de onboarding enviado',
+      at: emailSentAt, mark: onSendOnboarding, unset: onUnsetEmailSent,
+      markLabel: 'Enviar', markDisabled: !canSend },
+    { key: 'api',   icon: Key,    label: 'API key recebida',
+      at: apiKeyReceivedAt /* derived from fh_api_key — toggled via Ficha form */ },
+    { key: 'int',   icon: Wrench, label: 'Integração concluída',
+      at: integrationDoneAt, mark: onMarkIntegrationDone, unset: onUnsetIntegrationDone,
+      markLabel: 'Marcar', markDisabled: markingIntegration },
+    { key: 'live',  icon: Rocket, label: 'Em produção',
+      at: liveAt, mark: onMarkLive, unset: onUnsetLive,
+      markLabel: 'Marcar', markDisabled: saving },
+  ]
 
   return (
     <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[13px] font-semibold" style={{ color: 'var(--foreground)' }}>Onboarding</p>
-        <div className="flex gap-2">
-          {!emailSentAt && (
-            <Button onClick={onSendOnboarding} disabled={!canSend} size="sm" className="gap-1.5 h-7 text-[12px]">
-              <Send className="h-3.5 w-3.5" /> Enviar email de onboarding
-            </Button>
-          )}
-          {emailSentAt && apiKeyReceivedAt && !integrationDoneAt && (
-            <Button onClick={onMarkIntegrationDone} disabled={markingIntegration} variant="outline" size="sm" className="gap-1.5 h-7 text-[12px]">
-              {markingIntegration ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
-              Marcar integração feita
-            </Button>
-          )}
-        </div>
-      </div>
+      <p className="text-[13px] font-semibold" style={{ color: 'var(--foreground)' }}>Onboarding</p>
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-        {steps.map((s, idx) => {
+        {steps.map((s) => {
           const done = !!s.at
-          const active = !done && idx === nextIdx
           const Icon = s.icon
-          const bg = done   ? 'rgba(45,185,117,0.10)'
-                  : active ? 'rgba(91,91,214,0.08)'
-                  :          'var(--muted)'
-          const fg = done   ? '#1a9e6c'
-                  : active ? 'var(--primary)'
-                  :          'var(--muted-foreground)'
-          const border = done   ? '1px solid rgba(45,185,117,0.25)'
-                       : active ? '1px solid rgba(91,91,214,0.3)'
-                       :          '1px solid var(--border)'
+          const bg = done   ? 'rgba(45,185,117,0.10)' : 'var(--muted)'
+          const fg = done   ? '#1a9e6c'                : 'var(--muted-foreground)'
+          const border = done ? '1px solid rgba(45,185,117,0.25)' : '1px solid var(--border)'
           return (
-            <div key={s.key} className="rounded-lg p-3" style={{ background: bg, border }}>
+            <div key={s.key} className="rounded-lg p-3 space-y-1.5" style={{ background: bg, border }}>
               <div className="flex items-center gap-1.5">
                 {done
                   ? <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: fg }} />
-                  : active
-                    ? <Icon className="h-4 w-4 shrink-0" style={{ color: fg }} />
-                    : <Lock className="h-3.5 w-3.5 shrink-0" style={{ color: fg }} />
-                }
-                <p className="text-[11.5px] font-medium leading-tight" style={{ color: fg }}>{s.label}</p>
+                  : <Icon className="h-4 w-4 shrink-0" style={{ color: fg }} />}
+                <p className="text-[11.5px] font-medium leading-tight flex-1" style={{ color: fg }}>{s.label}</p>
               </div>
               {done && s.at && (
-                <p className="text-[10.5px] mt-1 tabular-nums" style={{ color: 'var(--muted-foreground)' }}>
+                <p className="text-[10.5px] tabular-nums" style={{ color: 'var(--muted-foreground)' }}>
                   {formatDateTime(s.at)}
                 </p>
               )}
+              {/* Inline toggle: mark when not done; reset when done */}
+              <div className="pt-1">
+                {!done && s.mark && (
+                  <button
+                    onClick={s.mark}
+                    disabled={s.markDisabled}
+                    className="text-[11px] rounded px-2 py-0.5 hover:bg-[var(--border)] disabled:opacity-50"
+                    style={{ color: 'var(--primary)', border: '1px solid var(--border)' }}
+                  >
+                    {s.markLabel}
+                  </button>
+                )}
+                {done && s.unset && (
+                  <button
+                    onClick={s.unset}
+                    className="text-[10.5px] rounded px-2 py-0.5 hover:bg-[var(--border)]"
+                    style={{ color: 'var(--muted-foreground)' }}
+                    title="Desmarcar"
+                  >
+                    ↺ Desmarcar
+                  </button>
+                )}
+                {!done && !s.mark && s.key === 'api' && (
+                  <span className="text-[10.5px]" style={{ color: 'var(--muted-foreground)' }}>
+                    Preenche FH API Key
+                  </span>
+                )}
+              </div>
             </div>
           )
         })}
