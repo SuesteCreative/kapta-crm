@@ -167,9 +167,18 @@ export type FhIntegrationStatus =
   | 'live' | 'troubleshoot' | 'follow_up' | 'churned'
 export type FhCountry = 'PT' | 'ES' | 'other'
 
-export const FH_INVOICING_SYSTEMS_PT = ['IGEST', 'Moloni', 'InvoiceXpress'] as const
+export const FH_INVOICING_SYSTEMS_PT = ['IGEST', 'Moloni', 'InvoiceXpress', 'Vendus'] as const
 export const FH_INVOICING_SYSTEMS_ES = ['Holded', 'Billin', 'Sage'] as const
 export const FH_INVOICING_SYSTEMS = [...FH_INVOICING_SYSTEMS_PT, ...FH_INVOICING_SYSTEMS_ES, 'Outro'] as const
+
+/** Map invoicing system → country (case-insensitive). Returns null for unknown systems. */
+export function countryFromInvoicingSystem(invoicing: string | null | undefined): FhCountry | null {
+  if (!invoicing) return null
+  const v = invoicing.trim().toLowerCase()
+  if (['moloni', 'invoicexpress', 'invoice xpress', 'vendus', 'igest'].includes(v)) return 'PT'
+  if (['holded', 'billin', 'sage'].includes(v)) return 'ES'
+  return null
+}
 
 export const FH_STATUS_LABELS: Record<FhIntegrationStatus, string> = {
   new:              'Novo',

@@ -1,4 +1,4 @@
-import type { FhCountry } from './database.types'
+import { countryFromInvoicingSystem, type FhCountry } from './database.types'
 
 export interface FhIntegrationParsed {
   name?: string
@@ -10,12 +10,13 @@ export interface FhIntegrationParsed {
 }
 
 const RE = {
-  name:            /^[\s>]*Name:\s*(.+?)\s*$/im,
-  shortname:       /^[\s>]*FareHarbor\s+Shortname:\s*([A-Za-z0-9_-]+)\s*$/im,
-  email:           /^[\s>]*Email:\s*([^\s<>]+@[^\s<>]+)\s*$/im,
-  country:         /^[\s>]*Country:\s*([A-Za-z]{2,})\s*$/im,
-  invoicingSystem: /^[\s>]*Invoicing\s+System:\s*(.+?)\s*$/im,
-  authorization:   /^[\s>]*Authorization:\s*(Yes|No|Sim|N[ãa]o|True|False)\s*$/im,
+  name:            /^[\s>]*(?:Name|Nome)\s*[:\-—]\s*(.+?)\s*$/im,
+  // Strict: FareHarbor Shortname. Loose fallback below.
+  shortname:       /^[\s>]*(?:FareHarbor\s+Shortname|FH\s+Shortname|Shortname)\s*[:\-—]\s*([A-Za-z0-9_-]+)\s*$/im,
+  email:           /^[\s>]*(?:Email|E[\- ]?mail)\s*[:\-—]\s*([^\s<>]+@[^\s<>]+)\s*$/im,
+  country:         /^[\s>]*(?:Country|País|Pais)\s*[:\-—]\s*([A-Za-z]{2,})\s*$/im,
+  invoicingSystem: /^[\s>]*(?:Invoicing\s+System|Sistema\s+de\s+factura(?:ção|cao)|Sistema\s+de\s+faturação)\s*[:\-—]\s*(.+?)\s*$/im,
+  authorization:   /^[\s>]*(?:Authorization|Autoriza(?:ção|cao))\s*[:\-—]\s*(Yes|No|Sim|N[ãa]o|True|False)\s*$/im,
 }
 
 function normalizeCountry(raw: string | undefined): FhCountry | undefined {
@@ -38,9 +39,12 @@ export function parseFhIntegrationEmail(body: string | null | undefined): FhInte
   const name             = body.match(RE.name)?.[1]?.trim()
   const shortname        = body.match(RE.shortname)?.[1]?.trim()
   const email            = body.match(RE.email)?.[1]?.toLowerCase().trim()
-  const country          = normalizeCountry(body.match(RE.country)?.[1])
+  const explicitCountry  = normalizeCountry(body.match(RE.country)?.[1])
   const invoicingSystem  = body.match(RE.invoicingSystem)?.[1]?.trim()
   const authorization    = normalizeAuth(body.match(RE.authorization)?.[1])
+
+  // If country missing/unclear, derive from invoicing system (Moloni/IX/Vendus → PT, Holded/Billin/Sage → ES)
+  const country = explicitCountry ?? countryFromInvoicingSystem(invoicingSystem) ?? undefined
 
   const out: FhIntegrationParsed = {}
   if (name)            out.name = name

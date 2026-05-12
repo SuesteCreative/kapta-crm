@@ -12,7 +12,7 @@ import { Loader2, Plug, CheckCircle2, AlertTriangle, Pencil } from 'lucide-react
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import {
-  FH_INVOICING_SYSTEMS, FH_STATUS_LABELS,
+  FH_INVOICING_SYSTEMS, FH_STATUS_LABELS, countryFromInvoicingSystem,
   type FhCountry, type FhIntegrationStatus,
 } from '@/lib/database.types'
 import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
@@ -288,7 +288,16 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
               <Label>Sistema de faturação</Label>
               <Input
                 value={form.invoicing_system}
-                onChange={(e) => setForm({ ...form, invoicing_system: e.target.value })}
+                onChange={(e) => {
+                  const v = e.target.value
+                  const derived = countryFromInvoicingSystem(v)
+                  setForm({
+                    ...form,
+                    invoicing_system: v,
+                    // Auto-fill country if it's empty AND invoicing system implies one
+                    country: form.country || (derived ?? form.country),
+                  })
+                }}
                 placeholder="IGEST, Moloni, Holded…"
                 list="fh-invoicing-systems"
               />

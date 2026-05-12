@@ -24,13 +24,23 @@ export default async function FareHarborPage() {
       .eq('metadata->>fh_integration_request', 'true')
       .is('metadata->>fh_integration_id', null)
       .order('occurred_at', { ascending: false }),
+    // Multi-pattern detection: catches legacy emails with varied label formats
+    // ("FareHarbor Shortname:", "FH Shortname:", "Shortname:", PT labels, "-/—" separators).
     supabase
       .from('interactions')
       .select('id, subject, content, occurred_at, customer_id, metadata, customers(id, name, company)')
       .eq('type', 'email')
-      .ilike('content', '%FareHarbor Shortname:%')
+      .or([
+        'content.ilike.%FareHarbor Shortname%',
+        'content.ilike.%FH Shortname%',
+        'content.ilike.%Shortname%fareharbor%',
+        'content.ilike.%fareharbor%Shortname%',
+        'subject.ilike.%FareHarbor%integration%',
+        'subject.ilike.%integração FareHarbor%',
+        'subject.ilike.%pedido%FareHarbor%',
+      ].join(','))
       .order('occurred_at', { ascending: false })
-      .limit(500),
+      .limit(800),
   ])
 
   type Raw = {
@@ -81,6 +91,12 @@ export default async function FareHarborPage() {
     const customer = Array.isArray(cust) ? cust[0] ?? null : cust ?? null
 
     const parsedEmail = ((parsedRaw.email as string | undefined) ?? '').toLowerCase().trim()
+    const parsedShortname = ((parsedRaw.shortname as string | undefined) ?? '').trim()
+
+    // Skip if parser yielded no usable data (broader ilike pulls some non-FH emails)
+    if (!parsedEmail && !parsedShortname) continue
+    // Skip if the parsed email is internal (forwarded internal trash, not a real partner)
+    if (parsedEmail && /@kapta\.pt$/i.test(parsedEmail)) continue
 
     // Dedup against existing integrations
     if (parsedEmail && existingEmails.has(parsedEmail)) continue

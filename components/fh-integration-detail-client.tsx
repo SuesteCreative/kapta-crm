@@ -21,7 +21,7 @@ import { FollowUpDialog } from '@/components/follow-up-dialog'
 import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
 import {
-  FH_STATUS_LABELS, FH_STATUS_ORDER, FH_INVOICING_SYSTEMS,
+  FH_STATUS_LABELS, FH_STATUS_ORDER, FH_INVOICING_SYSTEMS, countryFromInvoicingSystem,
   type FhIntegration, type FhIntegrationStatus, type FhCountry,
   type Interaction, type CustomerIdentifier,
 } from '@/lib/database.types'
@@ -238,6 +238,26 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
       toast.error(e instanceof Error ? e.message : 'Erro.')
     } finally {
       setMarkingIntegration(false)
+    }
+  }
+
+  async function markOnboardingSent() {
+    setSaving(true)
+    try {
+      const nowIso = new Date().toISOString()
+      const nextStatus = autoBump(form.status, 'onboarding')
+      const { error } = await supabase
+        .from('fh_integrations')
+        .update({ onboarding_email_sent_at: nowIso, status: nextStatus, last_contact_at: nowIso })
+        .eq('id', fh.id)
+      if (error) throw error
+      setForm((f) => ({ ...f, status: nextStatus, last_contact_at: nowIso }))
+      toast.success('Email marcado como enviado.')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro.')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -557,6 +577,7 @@ Se tiver alguma questão, não hesite em contactar.`
         integrationDoneAt={fh.integration_completed_at}
         liveAt={liveAt}
         onSendOnboarding={openOnboarding}
+        onMarkEmailSent={markOnboardingSent}
         onUnsetEmailSent={unsetOnboardingSent}
         onMarkApiKey={markApiKeyReceived}
         onUnsetApiKey={unsetApiKeyReceived}
@@ -631,7 +652,15 @@ Se tiver alguma questão, não hesite em contactar.`
                 <Label>Sistema de faturação</Label>
                 <Input
                   value={form.invoicing_system}
-                  onChange={(e) => setForm({ ...form, invoicing_system: e.target.value })}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    const derived = countryFromInvoicingSystem(v)
+                    setForm({
+                      ...form,
+                      invoicing_system: v,
+                      country: form.country || (derived ?? form.country),
+                    })
+                  }}
                   list="fh-invoicing-systems-detail"
                 />
                 <datalist id="fh-invoicing-systems-detail">
@@ -815,7 +844,7 @@ Se tiver alguma questão, não hesite em contactar.`
 
 function OnboardingChecklist({
   emailSentAt, apiKeyReceivedAt, integrationDoneAt, liveAt,
-  onSendOnboarding, onUnsetEmailSent,
+  onSendOnboarding, onMarkEmailSent, onUnsetEmailSent,
   onMarkApiKey, onUnsetApiKey,
   onMarkIntegrationDone, onUnsetIntegrationDone,
   onMarkLive, onUnsetLive,
@@ -826,6 +855,7 @@ function OnboardingChecklist({
   integrationDoneAt: string | null
   liveAt: string | null
   onSendOnboarding: () => void
+  onMarkEmailSent: () => void
   onUnsetEmailSent: () => void
   onMarkApiKey: () => void
   onUnsetApiKey: () => void
@@ -846,11 +876,15 @@ function OnboardingChecklist({
     unset?: () => void
     markLabel?: string
     markDisabled?: boolean
+    secondaryMark?: () => void
+    secondaryLabel?: string
+    secondaryDisabled?: boolean
   }
   const steps: Step[] = [
     { key: 'email', icon: Mail,   label: 'Email de onboarding enviado',
       at: emailSentAt, mark: onSendOnboarding, unset: onUnsetEmailSent,
-      markLabel: 'Enviar', markDisabled: !canSend },
+      markLabel: 'Enviar', markDisabled: !canSend,
+      secondaryMark: onMarkEmailSent, secondaryLabel: '✓ Já enviei', secondaryDisabled: saving },
     { key: 'api',   icon: Key,    label: 'API key recebida',
       at: apiKeyReceivedAt, mark: onMarkApiKey, unset: onUnsetApiKey,
       markLabel: 'Marcar', markDisabled: saving },
@@ -886,7 +920,7 @@ function OnboardingChecklist({
                 </p>
               )}
               {/* Inline toggle: mark when not done; reset when done */}
-              <div className="pt-1">
+              <div className="pt-1 flex flex-wrap gap-1">
                 {!done && s.mark && (
                   <button
                     onClick={s.mark}
@@ -895,6 +929,17 @@ function OnboardingChecklist({
                     style={{ color: 'var(--primary)', border: '1px solid var(--border)' }}
                   >
                     {s.markLabel}
+                  </button>
+                )}
+                {!done && s.secondaryMark && (
+                  <button
+                    onClick={s.secondaryMark}
+                    disabled={s.secondaryDisabled}
+                    className="text-[11px] rounded px-2 py-0.5 hover:bg-[var(--border)] disabled:opacity-50"
+                    style={{ color: 'var(--muted-foreground)' }}
+                    title="Marcar como já feito sem enviar"
+                  >
+                    {s.secondaryLabel}
                   </button>
                 )}
                 {done && s.unset && (
