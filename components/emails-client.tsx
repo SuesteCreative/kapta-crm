@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Mail, MailOpen, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
   ExternalLink, Paperclip, Reply, ReplyAll, Forward, PenSquare, FileText, Trash2,
-  Ticket as TicketIcon, CalendarCheck, AlertTriangle, ChevronRight, Plug,
+  Ticket as TicketIcon, CalendarCheck, AlertTriangle, ChevronRight, Plug, Wrench,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
@@ -843,6 +843,16 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                       >
                         <Plug className="h-2.5 w-2.5" />
                         FH
+                      </span>
+                    )}
+                    {email.metadata?.fh_troubleshoot_hint === true && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium shrink-0"
+                        style={{ background: 'rgba(245,158,11,0.15)', color: '#B45309' }}
+                        title={`Possível troubleshoot — keyword: ${(email.metadata?.fh_troubleshoot_match as string | undefined) ?? '?'}`}
+                      >
+                        <Wrench className="h-2.5 w-2.5" />
+                        troubleshoot?
                       </span>
                     )}
                     {email.metadata?.fh_integration_id != null && (

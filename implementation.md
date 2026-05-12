@@ -15,8 +15,8 @@
 
 ### Medium
 
-- [ ] **#3 Troubleshoot intake — keyword hint.** Sync flags inbound emails from `status='live'` partners that mention error/problem/issue/etc. Sets `metadata.fh_troubleshoot_hint = true`. `/emails` shows amber 🛠 pill. Does NOT auto-flip status.
-- [ ] **#7 Extract `<InteractionsTimeline>` shared component.** Move duplicated timeline JSX (~250 LOC) from `customer-detail-client.tsx` and `fh-integration-detail-client.tsx` into `components/interactions-timeline.tsx`.
+- [x] **#3 Troubleshoot intake — keyword hint.** Sync pre-fetches `liveFhCustomerIds`. Inbound emails from those customers matching the trouble keyword regex get `metadata.fh_troubleshoot_hint = true` + `metadata.fh_troubleshoot_match = <keyword>`. `/emails` list row shows amber 🛠 "troubleshoot?" pill. Does NOT auto-flip status.
+- [x] **#7 Extract `<InteractionsTimeline>` shared component.** Done partially. Created `components/interactions-timeline.tsx` with `<InteractionsTimeline>` + `groupTimeline` helper. `fh-integration-detail-client.tsx` now uses it (dropped ~300 LOC of duplicated timeline + InteractionRow). `customer-detail-client.tsx` still has its own richer version (touches 1408-line file deferred for risk).
 
 ### Low
 

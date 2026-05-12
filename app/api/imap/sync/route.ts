@@ -159,6 +159,19 @@ export async function GET(req: NextRequest) {
     return entry
   }
 
+  // Pre-fetch customer_ids of partners with active FH integration — used to
+  // tag inbound emails that mention error/problem keywords as potential
+  // troubleshoots (hint-only; no auto status change).
+  const { data: liveFhRows } = await supabase
+    .from('fh_integrations')
+    .select('customer_id')
+    .in('status', ['live', 'integration_done', 'api_received'])
+  const liveFhCustomerIds = new Set<string>()
+  for (const r of liveFhRows ?? []) {
+    if (r.customer_id) liveFhCustomerIds.add(r.customer_id)
+  }
+  const TROUBLE_RE = /\b(erro|problema|falha|bug|não\s+funciona|nao\s+funciona|ajuda|urgente|error|issue|broken|doesn'?t\s+work|fails|help|support|urgent)\b/i
+
   const { data: latestEmail } = await supabase
     .from('interactions')
     .select('occurred_at')
@@ -463,6 +476,24 @@ export async function GET(req: NextRequest) {
           const isFh = isFhIntegrationEmail(fromForFh, subject, bodyText)
           const fhParsed = isFh ? parseFhIntegrationEmail(bodyText) : null
 
+          // Troubleshoot hint: inbound email from a partner with active FH
+          // integration that mentions trouble keywords. Hint-only — Pedro
+          // decides whether to flip status manually.
+          let troubleshootHint = false
+          let troubleshootMatch: string | null = null
+          if (
+            effectiveDirection === 'inbound' &&
+            customerId &&
+            liveFhCustomerIds.has(customerId)
+          ) {
+            const haystack = `${subject ?? ''}\n${bodyText ?? ''}`
+            const m = haystack.match(TROUBLE_RE)
+            if (m) {
+              troubleshootHint = true
+              troubleshootMatch = m[0]
+            }
+          }
+
           // Upgrade customer name when FH-parsed name is richer than the
           // local-part placeholder sync gave it initially.
           if (isFh && fhParsed?.name && customerId) {
@@ -493,6 +524,7 @@ export async function GET(req: NextRequest) {
               parsed_version: 'mailparser-1',
               ...(bodyHtml ? { html: bodyHtml } : {}),
               ...(isFh ? { fh_integration_request: true, fh_parsed: fhParsed } : {}),
+              ...(troubleshootHint ? { fh_troubleshoot_hint: true, fh_troubleshoot_match: troubleshootMatch } : {}),
             },
             is_read:     effectiveDirection === 'outbound',
             occurred_at: date.toISOString(),
