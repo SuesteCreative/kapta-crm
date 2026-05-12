@@ -7,45 +7,41 @@ import { stripHtml } from '@/lib/html-utils'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const SYSTEM_PROMPT_PT = `Write email reply for Pedro (Kapta, B2B account manager, PT).
+const SYSTEM_PROMPT_PT = `Write email reply for Pedro (Kapta, B2B account manager, PT). Output in European Portuguese.
 
-Tone: professional, warm, direct. Not formal. Concise. European Portuguese.
-Greeting: "Olá [Nome],". Sign-off: appended downstream — DO NOT write closing.
+INSTRUCTION-FIRST: If <INSTRUCTION> block in user message, that is canonical brief for THIS email. Cover every point in it. Thread is reference only. Do NOT substitute generic follow-up text. Do NOT skip instruction items.
 
-Reply rules:
-- Question asked → answer clearly.
-- Problem reported → acknowledge + state what Pedro will do.
-- Pedro promised something + late → apologise + give timeline.
-- 3-5 short paragraphs max. No filler. No exclamation marks unless tone demands.
-- Never invent facts. Uncertain value → "[verificar X]".
-- <customer_context> present → reference open tickets / follow-ups / recent meetings if relevant. Don't pretend issues don't exist.
+Tone: pro, warm, direct. Not formal. Concise.
+Greeting: "Olá [Nome],". No sign-off (added downstream).
 
-Output JSON:
-{ "subject": "Re: ...", "body": "..." }
-- subject: keep original "Re: ..." or minor tweak.
-- body: greeting + content. NO sign-off.
+Rules:
+- Question → answer.
+- Problem → acknowledge + state action.
+- Promise late → apologise + timeline.
+- Max 3-5 short paragraphs. Zero filler. No "!" unless tone needs.
+- Never invent. Unsure → "[verificar X]".
+- <customer_context> → reference open tickets/follow-ups if relevant.
 
-Return ONLY JSON. No markdown. No explanation.`
+Output JSON only, no markdown:
+{ "subject": "Re: ...", "body": "Olá...\\n\\n..." }`
 
-const SYSTEM_PROMPT_EN = `Write email reply for Pedro (Kapta, B2B account manager).
+const SYSTEM_PROMPT_EN = `Write email reply for Pedro (Kapta, B2B account manager). Output in British English.
 
-Tone: professional, warm, direct. Not formal. Concise. Clear British English.
-Greeting: "Hi [Name],". Sign-off: appended downstream — DO NOT write closing.
+INSTRUCTION-FIRST: If <INSTRUCTION> block in user message, that is canonical brief for THIS email. Cover every point in it. Thread is reference only. Do NOT substitute generic follow-up text. Do NOT skip instruction items.
 
-Reply rules:
-- Question asked → answer clearly.
-- Problem reported → acknowledge + state what Pedro will do.
-- Pedro promised something + late → apologise + give timeline.
-- 3-5 short paragraphs max. No filler. No exclamation marks unless tone demands.
-- Never invent facts. Uncertain value → "[check X]".
-- <customer_context> present → reference open tickets / follow-ups / recent meetings if relevant. Don't pretend issues don't exist.
+Tone: pro, warm, direct. Not formal. Concise.
+Greeting: "Hi [Name],". No sign-off (added downstream).
 
-Output JSON:
-{ "subject": "Re: ...", "body": "..." }
-- subject: keep original "Re: ..." or minor tweak.
-- body: greeting + content. NO sign-off.
+Rules:
+- Question → answer.
+- Problem → acknowledge + state action.
+- Promise late → apologise + timeline.
+- Max 3-5 short paragraphs. Zero filler. No "!" unless tone needs.
+- Never invent. Unsure → "[check X]".
+- <customer_context> → reference open tickets/follow-ups if relevant.
 
-Return ONLY JSON. No markdown. No explanation.`
+Output JSON only, no markdown:
+{ "subject": "Re: ...", "body": "Hi...\\n\\n..." }`
 
 type AttachmentMeta = { name: string; ai_summary?: string; mime?: string }
 
@@ -107,11 +103,13 @@ async function handle(req: Request) {
     customerContext = null
   }
 
-  // Build thread oldest → newest, up to 30 emails so older context (platform names,
-  // account IDs, prior promises) survives long threads.
+  // When user gave a specific instruction, trim thread to last 5 emails (instruction is canonical,
+  // long thread dilutes attention). Without instruction, keep 30 emails for context recovery.
+  const hasInstruction = !!user_instruction?.trim()
+  const threadLimit = hasInstruction ? 5 : 30
   const emailThread = interactions
     .filter((i) => i.type === 'email')
-    .slice(0, 30)
+    .slice(0, threadLimit)
     .reverse()
     .map((i) => {
       const who = i.direction === 'inbound'
@@ -159,23 +157,39 @@ ${text}`
     })
   }
 
+  // Put INSTRUCTION block at the TOP of the user message so Sonnet anchors on it,
+  // not on the thread. Wrap in explicit markers so the system prompt's INSTRUCTION-FIRST
+  // rule fires reliably.
+  const userMessage = hasInstruction
+    ? [
+        `<INSTRUCTION>`,
+        user_instruction!.trim(),
+        `</INSTRUCTION>`,
+        ``,
+        `Write Pedro's reply NOW based on the INSTRUCTION above. Cover every point.`,
+        `Last message in thread is from ${customer_name}. Use "Re: ${lastSubject}" as subject (or minor tweak).`,
+        ``,
+        `Thread (reference, oldest → newest):`,
+        ``,
+        emailThread,
+      ].join('\n')
+    : [
+        `Write a reply to this email thread. The last message is from ${customer_name} and needs a response.`,
+        ``,
+        `Thread (oldest → newest — read all messages before replying):`,
+        ``,
+        emailThread,
+        ``,
+        `Use "Re: ${lastSubject}" as subject (or adjust slightly if needed).`,
+      ].join('\n')
+
   let message
   try {
     message = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 2048,
       system: systemBlocks,
-      messages: [{
-        role: 'user',
-        content: [
-          `Write a reply to this email thread. The last message is from ${customer_name} and needs a response.`,
-          user_instruction?.trim()
-            ? `\n\nPedro's instructions for THIS reply (override defaults if conflict):\n${user_instruction.trim()}`
-            : '',
-          `\n\nThread (oldest → newest — read all messages, including older ones, before replying):\n\n${emailThread}`,
-          `\n\nUse "Re: ${lastSubject}" as subject (or adjust slightly if needed).`,
-        ].join(''),
-      }],
+      messages: [{ role: 'user', content: userMessage }],
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

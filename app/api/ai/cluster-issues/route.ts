@@ -85,7 +85,7 @@ export async function POST() {
   let message
   try {
     message = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: [{ type: 'text', text: `${SYSTEM_PROMPT}${memorySystemBlock(memory)}`, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Group by common issue:\n\n${itemsText}` }],
