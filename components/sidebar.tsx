@@ -27,6 +27,18 @@ export function Sidebar() {
   const router = useRouter()
   const [syncing, setSyncing]   = useState(false)
   const [pasteOpen, setPasteOpen] = useState(false)
+  const [fhPending, setFhPending] = useState<number>(0)
+
+  // Pending FH count badge — refetch on path change so converting a row updates the badge.
+  useEffect(() => {
+    if (pathname === '/login') return
+    let cancelled = false
+    fetch('/api/fareharbor/pending-count')
+      .then((r) => r.ok ? r.json() : { count: 0 })
+      .then((d) => { if (!cancelled) setFhPending(d.count ?? 0) })
+      .catch(() => { /* silent */ })
+    return () => { cancelled = true }
+  }, [pathname])
 
   // Global keyboard shortcut: Cmd/Ctrl + Shift + V
   useEffect(() => {
@@ -144,6 +156,15 @@ export function Sidebar() {
                 strokeWidth={active ? 2.5 : 2}
               />
               <span className="flex-1">{label}</span>
+              {href === '/fareharbor' && fhPending > 0 && (
+                <span
+                  className="rounded-full text-[10px] font-semibold px-1.5 py-px tabular-nums"
+                  style={{ background: 'rgba(229,72,77,0.18)', color: '#FF6B6B' }}
+                  title={`${fhPending} por contactar`}
+                >
+                  {fhPending}
+                </span>
+              )}
               {active && (
                 <ChevronRight
                   className="h-3 w-3 opacity-40"

@@ -427,19 +427,26 @@ Se tiver alguma questão, não hesite em contactar.`
   }
 
   async function handleSent() {
-    // Only the onboarding flow updates the checklist timestamp + bumps status.
-    if (sendMode !== 'onboarding') { router.refresh(); return }
+    const nowIso = new Date().toISOString()
     try {
-      const nowIso = new Date().toISOString()
-      const nextStatus = autoBump(form.status, 'onboarding')
-      await supabase
-        .from('fh_integrations')
-        .update({ onboarding_email_sent_at: nowIso, last_contact_at: nowIso, status: nextStatus })
-        .eq('id', fh.id)
-      if (nextStatus !== form.status) setForm((f) => ({ ...f, status: nextStatus }))
+      // Every send updates last_contact_at. Onboarding mode additionally
+      // bumps the checklist timestamp + auto-progresses status.
+      const update: Record<string, unknown> = { last_contact_at: nowIso }
+      let nextStatus = form.status
+      if (sendMode === 'onboarding') {
+        update.onboarding_email_sent_at = nowIso
+        nextStatus = autoBump(form.status, 'onboarding')
+        if (nextStatus !== form.status) update.status = nextStatus
+      }
+      await supabase.from('fh_integrations').update(update).eq('id', fh.id)
+
+      // Sync local form state so the visible "Último contacto" input refreshes
+      // immediately — useState initial value is frozen, router.refresh alone
+      // would not update the input.
+      setForm((f) => ({ ...f, last_contact_at: nowIso, status: nextStatus }))
       router.refresh()
     } catch {
-      // Send already succeeded; checklist tick is best-effort.
+      // Send already succeeded; metadata update is best-effort.
     }
   }
 

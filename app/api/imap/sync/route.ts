@@ -5,6 +5,7 @@ import { createServiceClient } from '@/lib/supabase'
 import { analyzeAttachment } from '@/lib/analyze-attachment'
 import { decodeLegacyEmailContent, looksLikeLegacyEmail } from '@/lib/decode-legacy-email'
 import { isFhIntegrationEmail, parseFhIntegrationEmail } from '@/lib/fh-integration-parser'
+import { extractForwardedSender } from '@/lib/email-utils'
 import { randomUUID } from 'crypto'
 
 export const dynamic = 'force-dynamic'
@@ -71,21 +72,7 @@ function deriveCompanyFromSender(email: string, displayName: string): { name: st
   return null
 }
 
-function extractForwardedSender(body: string): { email: string; name: string } | null {
-  const patterns = [
-    /^[>\s]*From:\s+(?:"?([^"<\r\n]+?)"?\s+)?<([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})>/im,
-    /^[>\s]*From:\s+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/im,
-  ]
-  for (const pattern of patterns) {
-    const match = body.match(pattern)
-    if (match) {
-      const name  = match[1]?.trim() ?? ''
-      const email = (match[2] ?? match[1])?.toLowerCase().trim()
-      if (email?.includes('@')) return { email, name }
-    }
-  }
-  return null
-}
+// extractForwardedSender moved to lib/email-utils.ts (shared with backfill route)
 
 type AddressInfo = { address?: string; name?: string }
 
