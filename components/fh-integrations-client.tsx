@@ -277,27 +277,46 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
               >
                 <div className="flex items-start justify-between gap-3">
                   <button
-                    onClick={() => convertPending(p, 'new')}
+                    onClick={() => {
+                      // No shortname → can't auto-create. Open dialog so Pedro fills the gap.
+                      if (!p.shortname) openPendingDialog(p)
+                      else convertPending(p, 'new')
+                    }}
                     disabled={isConverting}
                     className="flex-1 min-w-0 space-y-1 text-left hover:opacity-90 disabled:opacity-60"
-                    title="Abrir ficha (cria integração e abre detalhe)"
+                    title={p.shortname
+                      ? 'Abrir ficha (cria integração e abre detalhe)'
+                      : 'Preencher shortname antes de criar integração'}
                   >
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold text-[14px]" style={{ color: 'var(--foreground)' }}>
                         {p.name ?? '(sem nome)'}
                       </p>
-                      {p.shortname && (
+                      {p.shortname ? (
                         <span
                           className="text-[11px] font-mono rounded px-1.5 py-px"
                           style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
                         >
                           {p.shortname}
                         </span>
+                      ) : (
+                        <span
+                          className="text-[10.5px] rounded px-1.5 py-px italic"
+                          style={{ background: 'rgba(245,158,11,0.1)', color: '#B45309' }}
+                          title="Falta shortname — clica para preencher"
+                        >
+                          sem shortname
+                        </span>
                       )}
                     </div>
                     <p className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>
                       {p.email ?? '—'}
                     </p>
+                    {p.subject && (
+                      <p className="text-[11.5px] truncate" style={{ color: 'var(--muted-foreground)' }}>
+                        <span style={{ color: 'var(--muted-foreground)' }}>↳ </span>{p.subject}
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-2 mt-1.5 text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
                       {p.country && (
                         <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
@@ -318,6 +337,8 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
                       value="__pending__"
                       onValueChange={(v) => {
                         if (v === '__pending__') return
+                        // Without shortname we can't auto-create — funnel through dialog.
+                        if (!p.shortname) { openPendingDialog(p); return }
                         convertPending(p, v as FhIntegrationStatus)
                       }}
                       disabled={isConverting}

@@ -7,12 +7,12 @@ import { parseFhIntegrationEmail } from '@/lib/fh-integration-parser'
 export default async function FareHarborPage() {
   const supabase = createServiceClient()
 
-  // Pull active integrations + every email that looks like a FH form request.
-  // We accept BOTH paths:
-  //   (a) emails flagged by sync (metadata.fh_integration_request = true)
-  //   (b) legacy emails whose content matches the FH form template
-  //       (FareHarbor Shortname + Email lines) — parsed on the fly here.
-  // De-dupe by interaction id and drop any already linked to an fh_integration.
+  // Three queries:
+  //   integrations   — existing fh_integrations rows
+  //   flaggedRes     — emails marked by sync (metadata.fh_integration_request)
+  //   contentRes     — broader: any inbound email mentioning "fareharbor" in subject/body
+  //                    (covers legacy form requests AND ongoing FH-related conversations
+  //                    that aren't structured form submissions)
   const [integrationsRes, flaggedRes, contentRes] = await Promise.all([
     supabase
       .from('fh_integrations')
@@ -20,41 +20,44 @@ export default async function FareHarborPage() {
       .order('created_at', { ascending: false }),
     supabase
       .from('interactions')
-      .select('id, subject, content, occurred_at, customer_id, metadata, customers(id, name, company)')
+      .select('id, subject, content, occurred_at, customer_id, metadata, customers(id, name, company, customer_identifiers(type, value, is_primary))')
       .eq('metadata->>fh_integration_request', 'true')
       .is('metadata->>fh_integration_id', null)
       .order('occurred_at', { ascending: false }),
-    // Multi-pattern detection: catches legacy emails with varied label formats
-    // ("FareHarbor Shortname:", "FH Shortname:", "Shortname:", PT labels, "-/—" separators).
     supabase
       .from('interactions')
-      .select('id, subject, content, occurred_at, customer_id, metadata, customers(id, name, company)')
+      .select('id, subject, content, occurred_at, direction, customer_id, metadata, customers(id, name, company, customer_identifiers(type, value, is_primary))')
       .eq('type', 'email')
-      .or([
-        'content.ilike.%FareHarbor Shortname%',
-        'content.ilike.%FH Shortname%',
-        'content.ilike.%Shortname%fareharbor%',
-        'content.ilike.%fareharbor%Shortname%',
-        'subject.ilike.%FareHarbor%integration%',
-        'subject.ilike.%integração FareHarbor%',
-        'subject.ilike.%pedido%FareHarbor%',
-      ].join(','))
+      .eq('direction', 'inbound')
+      .or('subject.ilike.%fareharbor%,subject.ilike.%fare harbor%,subject.ilike.%fareharbour%,content.ilike.%fareharbor%,content.ilike.%fareharbour%,content.ilike.%fare harbor%')
       .order('occurred_at', { ascending: false })
-      .limit(800),
+      .limit(1000),
   ])
 
+  type Identifier = { type: string; value: string; is_primary: boolean }
+  type CustomerWithIds = { id: string; name: string; company: string | null; customer_identifiers?: Identifier[] }
   type Raw = {
     id: string
     subject: string | null
     content: string | null
     occurred_at: string
     metadata: Record<string, unknown> | null
-    customers?: { id: string; name: string; company: string | null } | { id: string; name: string; company: string | null }[] | null
+    customers?: CustomerWithIds | CustomerWithIds[] | null
   }
 
-  // Build dedup sets from existing integrations:
-  // (1) emails — any pending whose parsed email matches an integration is dropped
-  // (2) customer_ids — any pending whose linked customer already has an integration is dropped
+  function flattenCustomer(c: Raw['customers']): CustomerWithIds | null {
+    if (!c) return null
+    return Array.isArray(c) ? c[0] ?? null : c
+  }
+
+  function primaryEmail(c: CustomerWithIds | null): string | null {
+    if (!c?.customer_identifiers) return null
+    const list = c.customer_identifiers.filter((i) => i.type === 'email')
+    const primary = list.find((i) => i.is_primary)
+    return (primary?.value ?? list[0]?.value ?? null)?.toLowerCase().trim() ?? null
+  }
+
+  // Dedup sets from existing integrations
   const existingEmails = new Set<string>()
   const existingCustomerIds = new Set<string>()
   for (const i of integrationsRes.data ?? []) {
@@ -62,24 +65,24 @@ export default async function FareHarborPage() {
     if (i.customer_id) existingCustomerIds.add(i.customer_id)
   }
 
-  const seen = new Set<string>()
+  // Merge candidates, dedup by interaction id
+  const seenInteractions = new Set<string>()
   const candidates: Raw[] = []
   for (const r of (flaggedRes.data ?? []) as Raw[]) {
-    if (seen.has(r.id)) continue
-    seen.add(r.id); candidates.push(r)
+    if (seenInteractions.has(r.id)) continue
+    seenInteractions.add(r.id); candidates.push(r)
   }
   for (const r of (contentRes.data ?? []) as Raw[]) {
-    if (seen.has(r.id)) continue
+    if (seenInteractions.has(r.id)) continue
     const md = (r.metadata ?? {}) as Record<string, unknown>
     if (md.fh_integration_id) continue // already converted
-    seen.add(r.id); candidates.push(r)
+    seenInteractions.add(r.id); candidates.push(r)
   }
 
-  // Sort newest-first
   candidates.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
 
   const pending: PendingFhEmail[] = []
-  const seenEmails = new Set<string>()
+  const seenSenderEmails = new Set<string>()
 
   for (const row of candidates) {
     const md     = (row.metadata ?? {}) as Record<string, unknown>
@@ -87,36 +90,35 @@ export default async function FareHarborPage() {
     const parsedRaw = (md.fh_parsed as Record<string, unknown> | undefined)
       ?? (parseFhIntegrationEmail(row.content) as unknown as Record<string, unknown>)
 
-    const cust = (row as Raw).customers
-    const customer = Array.isArray(cust) ? cust[0] ?? null : cust ?? null
+    const customer = flattenCustomer(row.customers)
 
+    // Partner email: prefer the parsed body email; fallback to the customer's primary email identifier.
     const parsedEmail = ((parsedRaw.email as string | undefined) ?? '').toLowerCase().trim()
+    const senderEmail = parsedEmail || primaryEmail(customer) || ''
     const parsedShortname = ((parsedRaw.shortname as string | undefined) ?? '').trim()
 
-    // Skip if parser yielded no usable data (broader ilike pulls some non-FH emails)
-    if (!parsedEmail && !parsedShortname) continue
-    // Skip if the parsed email is internal (forwarded internal trash, not a real partner)
-    if (parsedEmail && /@kapta\.pt$/i.test(parsedEmail)) continue
-
-    // Dedup against existing integrations
-    if (parsedEmail && existingEmails.has(parsedEmail)) continue
+    if (!senderEmail) continue // can't identify partner
+    if (/@kapta\.pt$/i.test(senderEmail)) continue // skip internal
+    if (existingEmails.has(senderEmail)) continue
     if (customer?.id && existingCustomerIds.has(customer.id)) continue
-    // Dedup pending candidates with the same parsed email (multiple forwards of same request)
-    if (parsedEmail && seenEmails.has(parsedEmail)) continue
-    if (parsedEmail) seenEmails.add(parsedEmail)
+    if (seenSenderEmails.has(senderEmail)) continue
+    seenSenderEmails.add(senderEmail)
+
+    // Strip identifiers from forwarded_to_customer (the client only needs id/name/company)
+    const fwCustomer = customer ? { id: customer.id, name: customer.name, company: customer.company } : null
 
     pending.push({
       interaction_id:    row.id,
       occurred_at:       row.occurred_at,
       subject:           row.subject,
-      name:              (parsedRaw.name as string | undefined) ?? null,
-      email:             (parsedRaw.email as string | undefined) ?? null,
+      name:              (parsedRaw.name as string | undefined) ?? customer?.name ?? null,
+      email:             senderEmail,
       country:           (parsedRaw.country as string | undefined) ?? null,
       invoicing_system:  (parsedRaw.invoicingSystem as string | undefined) ?? null,
-      shortname:         (parsedRaw.shortname as string | undefined) ?? null,
+      shortname:         parsedShortname || null,
       authorization:     (parsedRaw.authorization as boolean | undefined) ?? null,
       parsed:            parsedRaw,
-      forwarded_to_customer: customer,
+      forwarded_to_customer: fwCustomer,
       legacy:            !flagged,
     })
   }
