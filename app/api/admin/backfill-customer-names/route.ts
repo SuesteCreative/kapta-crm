@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { requireAuth } from '@/lib/api-auth'
 import { extractForwardedSender, looksHumanName } from '@/lib/email-utils'
+import { parseFhIntegrationEmail } from '@/lib/fh-integration-parser'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -64,14 +65,20 @@ export async function POST(req: NextRequest) {
     let bestName: string | null = null
     for (const i of interactions ?? []) {
       const body = (i.content as string) ?? ''
+
+      // Strategy 1: FareHarbor form body has "Name: ..." line + matching email
+      const fh = parseFhIntegrationEmail(body)
+      if (fh.name && fh.email && fh.email.toLowerCase() === t.email && looksHumanName(fh.name)) {
+        bestName = fh.name
+        break
+      }
+
+      // Strategy 2: forwarded "From: Display Name <email>" matching the customer's email
       const fwd = extractForwardedSender(body)
-      if (!fwd) continue
-      // Must match the customer's primary email (so we don't pull a different
-      // person's display name from quoted history).
-      if (fwd.email.toLowerCase() !== t.email) continue
-      if (!looksHumanName(fwd.name)) continue
-      bestName = fwd.name
-      break // newest match wins
+      if (fwd && fwd.email.toLowerCase() === t.email && looksHumanName(fwd.name)) {
+        bestName = fwd.name
+        break // newest match wins
+      }
     }
 
     if (!bestName) { skipped++; continue }
