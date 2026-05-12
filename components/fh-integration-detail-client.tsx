@@ -322,34 +322,41 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
   }
 
   async function openOnboarding() {
-    // Pull the "FareHarbor Onboarding" template (seed via SQL). If missing, fall back to a built-in copy.
+    // Pull the "FareHarbor Onboarding" template (seed via SQL). If missing, fall back to built-in copy.
     const { data: tpl } = await supabase
       .from('templates')
       .select('subject, body')
       .ilike('name', 'FareHarbor Onboarding')
       .maybeSingle()
 
-    const subject = (tpl?.subject ?? 'Bem-vindo à integração FareHarbor — {{name}}')
+    const invoicing = form.invoicing_system?.trim() || 'sistema de faturação'
+
+    const interpolate = (raw: string) => raw
       .replaceAll('{{name}}', form.name)
       .replaceAll('{{shortname}}', form.shortname)
+      .replaceAll('{{Sistema de faturação}}', invoicing)
+      .replaceAll('{{sistema de faturação}}', invoicing)
+      .replaceAll('{{invoicing_system}}', invoicing)
 
-    const body = (tpl?.body ??
-`Olá {{name}},
+    const fallbackSubject = `Pedido integração FareHarbor — ${form.name}`
+    const fallbackBody =
+`Bom dia.
+Espero que se encontre bem.
 
-Obrigado pelo teu interesse na integração FareHarbor com a Kapta. Para avançarmos, preciso de:
+O meu nome é Pedro e sou o responsável pelas integrações da Kapta.
 
-1. A tua API Key de FareHarbor (FareHarbor → User Settings → API Keys)
-2. Confirmação do shortname: {{shortname}}
-3. Confirmação do sistema de faturação a utilizar
+Recebi o seu pedido de integração FareHarbor - {{Sistema de faturação}}, e estou aqui para ajudar.
+Para iniciar esta integração é necessário pedir o acesso à API do FareHarbor, e ter a conta {{Sistema de faturação}} já ativa, com a ligação à ATCUD feita, série de faturação registada e acesso à chave API.
 
-Após receberes a API Key, responde a este email com a chave e eu trato da configuração técnica.
+Como parceiros da FareHarbor, temos um formulário de pedido de API. Basta preencher com os seus dados e a equipa FareHarbor irá contactar diretamente a Kapta com a sua API (geralmente leva entre 1h a 2 dias úteis): https://kapta.pt/fareharbor
 
-Qualquer dúvida estou disponível.
+Para finalizar a integração peço para marcar uma reunião para podermos ligar tudo em conjunto e tirar quaisquer dúvidas relativas à integração.
+Seguem as minhas disponibilidades: https://calendly.com/pedro-kapta/apoio-kapta
 
-Cumprimentos,
-Pedro`)
-      .replaceAll('{{name}}', form.name)
-      .replaceAll('{{shortname}}', form.shortname)
+Se tiver alguma questão, não hesite em contactar.`
+
+    const subject = interpolate(tpl?.subject ?? fallbackSubject)
+    const body    = interpolate(tpl?.body    ?? fallbackBody)
 
     setSendMode('onboarding')
     setReplySubject(null)
