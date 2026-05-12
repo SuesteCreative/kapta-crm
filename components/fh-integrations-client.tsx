@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Search, Plug, CheckCircle2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Search, Plug, CheckCircle2, Inbox, AlertCircle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatDate } from '@/lib/utils'
@@ -10,9 +11,25 @@ import {
   FH_STATUS_LABELS,
   type FhIntegration, type FhIntegrationStatus, type FhCountry,
 } from '@/lib/database.types'
+import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
+import { FhIntegrationDialog } from '@/components/fh-integration-dialog'
 
 type Row = FhIntegration & {
   customers: { id: string; name: string; company: string | null } | null
+}
+
+export interface PendingFhEmail {
+  interaction_id: string
+  occurred_at: string
+  subject: string | null
+  name: string | null
+  email: string | null
+  country: string | null
+  invoicing_system: string | null
+  shortname: string | null
+  authorization: boolean | null
+  parsed: Record<string, unknown>
+  forwarded_to_customer: { id: string; name: string; company: string | null } | null
 }
 
 const STATUS_STYLES: Record<FhIntegrationStatus, { bg: string; text: string }> = {
@@ -24,20 +41,28 @@ const STATUS_STYLES: Record<FhIntegrationStatus, { bg: string; text: string }> =
   churned:      { bg: 'rgba(156,163,175,0.1)', text: '#6B7280' },
 }
 
+const PENDING_STYLE = { bg: 'rgba(229,72,77,0.10)', text: '#C0272B' }
+
 const COUNTRY_LABELS: Record<FhCountry, string> = {
   PT: 'Portugal',
   ES: 'Espanha',
   other: 'Outro',
 }
 
-export function FhIntegrationsClient({ rows }: { rows: Row[] }) {
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | FhIntegrationStatus>('all')
-  const [countryFilter, setCountryFilter] = useState<'all' | FhCountry>('all')
+type StatusFilter = 'all' | 'pending' | FhIntegrationStatus
 
-  const filtered = useMemo(() => {
+export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: PendingFhEmail[] }) {
+  const router = useRouter()
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [countryFilter, setCountryFilter] = useState<'all' | FhCountry>('all')
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [dialogCtx, setDialogCtx] = useState<{ sourceId: string; prefill: FhIntegrationParsed | null } | null>(null)
+
+  const filteredIntegrations = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rows.filter((r) => {
+      if (statusFilter === 'pending') return false
       if (statusFilter !== 'all' && r.status !== statusFilter) return false
       if (countryFilter !== 'all' && r.country !== countryFilter) return false
       if (!q) return true
@@ -50,11 +75,49 @@ export function FhIntegrationsClient({ rows }: { rows: Row[] }) {
     })
   }, [rows, search, statusFilter, countryFilter])
 
+  const filteredPending = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return pending.filter((p) => {
+      if (statusFilter !== 'all' && statusFilter !== 'pending') return false
+      if (countryFilter !== 'all') {
+        const c = (p.country ?? '').toUpperCase()
+        if (countryFilter === 'PT' && c !== 'PT') return false
+        if (countryFilter === 'ES' && c !== 'ES') return false
+        if (countryFilter === 'other' && (c === 'PT' || c === 'ES')) return false
+      }
+      if (!q) return true
+      return (
+        (p.shortname?.toLowerCase().includes(q) ?? false) ||
+        (p.name?.toLowerCase().includes(q) ?? false) ||
+        (p.email?.toLowerCase().includes(q) ?? false) ||
+        (p.invoicing_system?.toLowerCase().includes(q) ?? false) ||
+        (p.subject?.toLowerCase().includes(q) ?? false)
+      )
+    })
+  }, [pending, search, statusFilter, countryFilter])
+
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: rows.length }
+    const c: Record<string, number> = { all: rows.length + pending.length, pending: pending.length }
     for (const r of rows) c[r.status] = (c[r.status] ?? 0) + 1
     return c
-  }, [rows])
+  }, [rows, pending])
+
+  function openPendingDialog(p: PendingFhEmail) {
+    const prefill: FhIntegrationParsed = {
+      name:            p.name ?? undefined,
+      shortname:       p.shortname ?? undefined,
+      email:           p.email ?? undefined,
+      country:         (p.country?.toUpperCase() === 'PT' ? 'PT' :
+                        p.country?.toUpperCase() === 'ES' ? 'ES' :
+                        p.country ? 'other' : undefined),
+      invoicingSystem: p.invoicing_system ?? undefined,
+      authorization:   p.authorization ?? undefined,
+    }
+    setDialogCtx({ sourceId: p.interaction_id, prefill })
+    setDialogOpen(true)
+  }
+
+  const hasPending = pending.length > 0
 
   return (
     <div className="p-8 space-y-6">
@@ -65,7 +128,15 @@ export function FhIntegrationsClient({ rows }: { rows: Row[] }) {
             Integrações FareHarbor
           </h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>
-            {rows.length} {rows.length === 1 ? 'parceiro' : 'parceiros'} · PT + ES
+            {pending.length > 0 && (
+              <>
+                <span style={{ color: PENDING_STYLE.text, fontWeight: 600 }}>
+                  {pending.length} por contactar
+                </span>
+                {' · '}
+              </>
+            )}
+            {rows.length} {rows.length === 1 ? 'parceiro ativo' : 'parceiros ativos'} · PT + ES
           </p>
         </div>
       </div>
@@ -83,6 +154,20 @@ export function FhIntegrationsClient({ rows }: { rows: Row[] }) {
         >
           Todos · {counts.all ?? 0}
         </button>
+        {hasPending && (
+          <button
+            onClick={() => setStatusFilter('pending')}
+            className="rounded-full px-3 py-1 text-[12px] font-medium transition-opacity hover:opacity-80 inline-flex items-center gap-1"
+            style={{
+              background: statusFilter === 'pending' ? PENDING_STYLE.bg : 'var(--card)',
+              color:      statusFilter === 'pending' ? PENDING_STYLE.text : 'var(--muted-foreground)',
+              border: `1px solid ${statusFilter === 'pending' ? PENDING_STYLE.text : 'var(--border)'}`,
+            }}
+          >
+            <AlertCircle className="h-3 w-3" />
+            Por contactar · {counts.pending}
+          </button>
+        )}
         {(Object.keys(FH_STATUS_LABELS) as FhIntegrationStatus[]).map((s) => {
           const active = statusFilter === s
           const style = STATUS_STYLES[s]
@@ -125,18 +210,93 @@ export function FhIntegrationsClient({ rows }: { rows: Row[] }) {
         </Select>
       </div>
 
-      {/* List */}
+      {/* Pending list — top, visually distinct */}
+      {filteredPending.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 px-1">
+            <Inbox className="h-4 w-4" style={{ color: PENDING_STYLE.text }} />
+            <p className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: PENDING_STYLE.text }}>
+              Por contactar · {filteredPending.length}
+            </p>
+          </div>
+          {filteredPending.map((p) => (
+            <button
+              key={p.interaction_id}
+              onClick={() => openPendingDialog(p)}
+              className="block w-full text-left rounded-xl p-5 transition-colors hover:opacity-95"
+              style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: `1px solid ${PENDING_STYLE.text}33` }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-[14px]" style={{ color: 'var(--foreground)' }}>
+                      {p.name ?? '(sem nome)'}
+                    </p>
+                    {p.shortname && (
+                      <span
+                        className="text-[11px] font-mono rounded px-1.5 py-px"
+                        style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                      >
+                        {p.shortname}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>
+                    {p.email ?? '—'}
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-1.5 text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
+                    {p.country && (
+                      <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
+                        {p.country.toUpperCase() === 'PT' ? 'Portugal'
+                          : p.country.toUpperCase() === 'ES' ? 'Espanha'
+                          : p.country}
+                      </span>
+                    )}
+                    {p.invoicing_system && (
+                      <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
+                        {p.invoicing_system}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span
+                    className="inline-flex items-center gap-1 text-[11.5px] font-medium rounded-full px-2.5 py-0.5"
+                    style={{ background: PENDING_STYLE.bg, color: PENDING_STYLE.text }}
+                  >
+                    <AlertCircle className="h-3 w-3" />
+                    Por contactar
+                  </span>
+                  <span className="text-[11px] tabular-nums" style={{ color: 'var(--muted-foreground)' }}>
+                    {formatDate(p.occurred_at)}
+                  </span>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Active integrations list */}
       <div className="space-y-3">
-        {filtered.length === 0 && (
+        {filteredIntegrations.length > 0 && (
+          <div className="flex items-center gap-2 px-1 pt-2">
+            <Plug className="h-4 w-4" style={{ color: 'var(--muted-foreground)' }} />
+            <p className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted-foreground)' }}>
+              Integrações · {filteredIntegrations.length}
+            </p>
+          </div>
+        )}
+        {filteredIntegrations.length === 0 && filteredPending.length === 0 && (
           <div className="rounded-xl p-10 text-center" style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>
             <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
-              {rows.length === 0
-                ? 'Ainda sem integrações. Aparecerão aqui quando converter um pedido do email.'
+              {rows.length === 0 && pending.length === 0
+                ? 'Ainda sem pedidos. Aparecerão aqui quando um email FH chegar.'
                 : 'Sem resultados para estes filtros.'}
             </p>
           </div>
         )}
-        {filtered.map((r) => {
+        {filteredIntegrations.map((r) => {
           const ss = STATUS_STYLES[r.status]
           return (
             <Link
@@ -198,6 +358,15 @@ export function FhIntegrationsClient({ rows }: { rows: Row[] }) {
           )
         })}
       </div>
+
+      {dialogCtx && (
+        <FhIntegrationDialog
+          open={dialogOpen}
+          sourceInteractionId={dialogCtx.sourceId}
+          prefill={dialogCtx.prefill}
+          onClose={() => { setDialogOpen(false); router.refresh() }}
+        />
+      )}
     </div>
   )
 }
