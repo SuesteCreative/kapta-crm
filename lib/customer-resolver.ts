@@ -146,6 +146,16 @@ export async function resolveOrCreateCustomerForFh(input: ResolveCustomerInput):
 
   const existing = await findCustomerByEmail(email)
   if (existing) {
+    // Upgrade auto-generated name (= email local-part) when we have a richer one.
+    const localPart = email.split('@')[0].toLowerCase()
+    const contact   = input.contactName.trim()
+    const looksHuman = /\s/.test(contact) || /[A-Z]/.test(contact)
+    if (looksHuman && existing.name && existing.name.toLowerCase() === localPart) {
+      await supabase
+        .from('customers')
+        .update({ name: contact })
+        .eq('id', existing.customer_id)
+    }
     return { customer_id: existing.customer_id, created_customer: false, company: null }
   }
 

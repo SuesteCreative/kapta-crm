@@ -476,6 +476,24 @@ export async function GET(req: NextRequest) {
           const isFh = isFhIntegrationEmail(fromForFh, subject, bodyText)
           const fhParsed = isFh ? parseFhIntegrationEmail(bodyText) : null
 
+          // Upgrade customer name when FH-parsed name is richer than the
+          // local-part placeholder sync gave it initially.
+          if (isFh && fhParsed?.name && customerId) {
+            const parsedName = fhParsed.name.trim()
+            const looksHuman = /\s/.test(parsedName) || /[A-Z]/.test(parsedName)
+            const localPart  = (matchedEmail || '').split('@')[0].toLowerCase()
+            if (looksHuman && localPart) {
+              const { data: cur } = await supabase
+                .from('customers')
+                .select('name')
+                .eq('id', customerId)
+                .maybeSingle()
+              if (cur?.name && cur.name.toLowerCase() === localPart) {
+                await supabase.from('customers').update({ name: parsedName }).eq('id', customerId)
+              }
+            }
+          }
+
           buffer.push({
             customer_id: customerId,
             type:        'email',
