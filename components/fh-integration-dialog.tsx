@@ -37,14 +37,13 @@ interface FormState {
   country: '' | FhCountry
   invoicing_system: string
   authorized: boolean
-  fh_api_key: string
   status: FhIntegrationStatus
   notes: string
 }
 
 const EMPTY: FormState = {
   shortname: '', name: '', email: '', country: '',
-  invoicing_system: '', authorized: false, fh_api_key: '',
+  invoicing_system: '', authorized: false,
   status: 'new', notes: '',
 }
 
@@ -73,7 +72,6 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
       country: prefill?.country ?? '',
       invoicing_system: prefill?.invoicingSystem ?? '',
       authorized: prefill?.authorization ?? false,
-      fh_api_key: '',
       status: 'new',
       notes: '',
     })
@@ -170,7 +168,6 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
           country: form.country || null,
           invoicing_system: form.invoicing_system.trim() || null,
           authorized: form.authorized,
-          fh_api_key: form.fh_api_key.trim() || null,
           status: form.status,
           notes: form.notes.trim() || null,
           customer_id: customerId,
@@ -313,17 +310,6 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
                 </SelectContent>
               </Select>
             </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>FH API Key</Label>
-            <Input
-              type="password"
-              value={form.fh_api_key}
-              onChange={(e) => setForm({ ...form, fh_api_key: e.target.value })}
-              placeholder="Opcional — pode preencher mais tarde"
-              autoComplete="off"
-            />
           </div>
 
           <div className="flex items-center gap-2">

@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Plug, CheckCircle2, UserPlus, CalendarCheck, Save, Loader2,
-  Eye, EyeOff, Mail, Trash2, Send, Reply, ChevronDown, ChevronUp, Sparkles,
+  Mail, Trash2, Send, Reply, ChevronDown, ChevronUp, Sparkles,
   ArrowDownLeft, ArrowUpRight, Circle, Lock, Key, Wrench, Rocket,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -107,12 +107,10 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
     country: (fh.country ?? '') as '' | FhCountry,
     invoicing_system: fh.invoicing_system ?? '',
     authorized: fh.authorized,
-    fh_api_key: fh.fh_api_key ?? '',
     status: fh.status,
     notes: fh.notes ?? '',
     last_contact_at: fh.last_contact_at ?? '',
   })
-  const [showKey, setShowKey]       = useState(false)
   const [saving, setSaving]         = useState(false)
   const [converting, setConverting] = useState(false)
   const [followUpOpen, setFollowUpOpen] = useState(false)
@@ -143,10 +141,6 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
   async function handleSave() {
     setSaving(true)
     try {
-      // Auto-bump to api_received when API key is first pasted and status is still early.
-      const hasKey = form.fh_api_key.trim().length > 0
-      const nextStatus = hasKey ? autoBump(form.status, 'api_received') : form.status
-
       const { error } = await supabase
         .from('fh_integrations')
         .update({
@@ -156,15 +150,15 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
           country: form.country || null,
           invoicing_system: form.invoicing_system.trim() || null,
           authorized: form.authorized,
-          fh_api_key: form.fh_api_key.trim() || null,
-          status: nextStatus,
+          // fh_api_key intentionally NOT written — data protection,
+          // the actual key never passes through this CRM (use checklist toggle instead).
+          status: form.status,
           notes: form.notes.trim() || null,
           last_contact_at: form.last_contact_at || null,
         })
         .eq('id', fh.id)
       if (error) throw error
-      if (nextStatus !== form.status) setForm((f) => ({ ...f, status: nextStatus }))
-      toast.success(nextStatus !== form.status ? `Guardado · estado → ${FH_STATUS_LABELS[nextStatus]}` : 'Guardado!')
+      toast.success('Guardado!')
       router.refresh()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao guardar.')
@@ -244,6 +238,43 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
       toast.error(e instanceof Error ? e.message : 'Erro.')
     } finally {
       setMarkingIntegration(false)
+    }
+  }
+
+  async function markApiKeyReceived() {
+    setSaving(true)
+    try {
+      const nowIso = new Date().toISOString()
+      const nextStatus = autoBump(form.status, 'api_received')
+      const { error } = await supabase
+        .from('fh_integrations')
+        .update({ api_key_received_at: nowIso, status: nextStatus })
+        .eq('id', fh.id)
+      if (error) throw error
+      setForm((f) => ({ ...f, status: nextStatus }))
+      toast.success('API key marcada como recebida.')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function unsetApiKeyReceived() {
+    setSaving(true)
+    try {
+      const { error } = await supabase
+        .from('fh_integrations')
+        .update({ api_key_received_at: null })
+        .eq('id', fh.id)
+      if (error) throw error
+      toast.success('API key desmarcada.')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro.')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -426,7 +457,7 @@ Se tiver alguma questão, não hesite em contactar.`
     ? new Date(form.last_contact_at).toISOString().slice(0, 16)
     : ''
 
-  const apiKeyReceivedAt = form.fh_api_key.trim().length > 0 ? fh.updated_at : null
+  const apiKeyReceivedAt = fh.api_key_received_at
   const liveAt = fh.live_at
 
   const allEmails: EmailContact[] = fh.customers?.customer_identifiers
@@ -527,6 +558,8 @@ Se tiver alguma questão, não hesite em contactar.`
         liveAt={liveAt}
         onSendOnboarding={openOnboarding}
         onUnsetEmailSent={unsetOnboardingSent}
+        onMarkApiKey={markApiKeyReceived}
+        onUnsetApiKey={unsetApiKeyReceived}
         onMarkIntegrationDone={markIntegrationDone}
         onUnsetIntegrationDone={unsetIntegrationDone}
         onMarkLive={markLive}
@@ -615,27 +648,6 @@ Se tiver alguma questão, não hesite em contactar.`
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>FH API Key</Label>
-              <div className="relative">
-                <Input
-                  type={showKey ? 'text' : 'password'}
-                  value={form.fh_api_key}
-                  onChange={(e) => setForm({ ...form, fh_api_key: e.target.value })}
-                  autoComplete="off"
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowKey((v) => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-[var(--border)]"
-                  title={showKey ? 'Esconder' : 'Mostrar'}
-                >
-                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
               </div>
             </div>
 
@@ -804,6 +816,7 @@ Se tiver alguma questão, não hesite em contactar.`
 function OnboardingChecklist({
   emailSentAt, apiKeyReceivedAt, integrationDoneAt, liveAt,
   onSendOnboarding, onUnsetEmailSent,
+  onMarkApiKey, onUnsetApiKey,
   onMarkIntegrationDone, onUnsetIntegrationDone,
   onMarkLive, onUnsetLive,
   markingIntegration, saving, canSend,
@@ -814,6 +827,8 @@ function OnboardingChecklist({
   liveAt: string | null
   onSendOnboarding: () => void
   onUnsetEmailSent: () => void
+  onMarkApiKey: () => void
+  onUnsetApiKey: () => void
   onMarkIntegrationDone: () => void
   onUnsetIntegrationDone: () => void
   onMarkLive: () => void
@@ -837,7 +852,8 @@ function OnboardingChecklist({
       at: emailSentAt, mark: onSendOnboarding, unset: onUnsetEmailSent,
       markLabel: 'Enviar', markDisabled: !canSend },
     { key: 'api',   icon: Key,    label: 'API key recebida',
-      at: apiKeyReceivedAt /* derived from fh_api_key — toggled via Ficha form */ },
+      at: apiKeyReceivedAt, mark: onMarkApiKey, unset: onUnsetApiKey,
+      markLabel: 'Marcar', markDisabled: saving },
     { key: 'int',   icon: Wrench, label: 'Integração concluída',
       at: integrationDoneAt, mark: onMarkIntegrationDone, unset: onUnsetIntegrationDone,
       markLabel: 'Marcar', markDisabled: markingIntegration },
@@ -890,11 +906,6 @@ function OnboardingChecklist({
                   >
                     ↺ Desmarcar
                   </button>
-                )}
-                {!done && !s.mark && s.key === 'api' && (
-                  <span className="text-[10.5px]" style={{ color: 'var(--muted-foreground)' }}>
-                    Preenche FH API Key
-                  </span>
                 )}
               </div>
             </div>
