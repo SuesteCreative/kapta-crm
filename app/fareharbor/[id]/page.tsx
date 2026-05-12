@@ -27,5 +27,15 @@ export default async function FareHarborDetailPage({ params }: { params: Promise
     sourceEmail = (data as Interaction | null) ?? null
   }
 
-  return <FhIntegrationDetailClient fh={fh} sourceEmail={sourceEmail} />
+  let interactions: Interaction[] = []
+  if (fh.customer_id) {
+    const { data } = await supabase
+      .from('interactions')
+      .select('*')
+      .eq('customer_id', fh.customer_id)
+      .order('occurred_at', { ascending: false })
+    interactions = (data as Interaction[] | null) ?? []
+  }
+
+  return <FhIntegrationDetailClient fh={fh} sourceEmail={sourceEmail} interactions={interactions} />
 }

@@ -28,6 +28,10 @@ interface Props {
   allEmails?: EmailContact[]
   /** Pre-fill the subject when dialog opens (e.g. "Re: ..." on reply) */
   initialSubject?: string
+  /** Pre-fill the body when dialog opens (template + variables already interpolated) */
+  initialBody?: string
+  /** Fired after a successful send (before onClose). Optional. */
+  onSent?: () => void
   onClose: () => void
 }
 
@@ -146,6 +150,8 @@ export function SendEmailDialog({
   interactions = [],
   allEmails = [],
   initialSubject,
+  initialBody,
+  onSent,
   onClose,
 }: Props) {
   const [to,          setTo]          = useState(customerEmail)
@@ -167,7 +173,7 @@ export function SendEmailDialog({
   useEffect(() => {
     if (!open) return
     setSubject(initialSubject ?? '')
-    setBody('')
+    setBody(initialBody ?? '')
     setCc('')
     setBcc('')
     setShowCcBcc(false)
@@ -276,6 +282,7 @@ export function SendEmailDialog({
       const data = await res.json()
       if (!res.ok || !data.ok) throw new Error(data.error ?? 'Erro desconhecido')
       toast.success('Email enviado!')
+      onSent?.()
       handleClose()
     } catch (err) {
       toast.error('Erro ao enviar email.')

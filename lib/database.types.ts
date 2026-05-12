@@ -192,6 +192,8 @@ export interface FhIntegration {
   source_interaction_id: string | null
   notes: string | null
   last_contact_at: string | null
+  onboarding_email_sent_at: string | null
+  integration_completed_at: string | null
   created_at: string
   updated_at: string
 }
