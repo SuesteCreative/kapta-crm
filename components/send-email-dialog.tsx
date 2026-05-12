@@ -163,7 +163,7 @@ export function SendEmailDialog({
   const [templates,   setTemplates]   = useState<Template[]>([])
   const [loading,     setLoading]     = useState(false)
   const [drafting,    setDrafting]    = useState(false)
-  const [language,    setLanguage]    = useState<'pt-PT' | 'en'>('pt-PT')
+  const [language,    setLanguage]    = useState<'pt-PT' | 'en' | 'es'>('pt-PT')
   const [refineInput, setRefineInput] = useState('')
   const [refining,    setRefining]    = useState(false)
   const [aiInstruction, setAiInstruction] = useState('')
@@ -351,7 +351,7 @@ export function SendEmailDialog({
                 className="flex items-center rounded-lg overflow-hidden shrink-0"
                 style={{ border: '1px solid rgba(91,91,214,0.25)' }}
               >
-                {(['pt-PT', 'en'] as const).map((lang) => (
+                {(['pt-PT', 'en', 'es'] as const).map((lang) => (
                   <button
                     key={lang}
                     onClick={() => setLanguage(lang)}
@@ -362,7 +362,7 @@ export function SendEmailDialog({
                       color: language === lang ? 'var(--primary)' : 'var(--muted-foreground)',
                     }}
                   >
-                    {lang === 'pt-PT' ? 'PT' : 'EN'}
+                    {lang === 'pt-PT' ? 'PT' : lang === 'en' ? 'EN' : 'ES'}
                   </button>
                 ))}
               </div>

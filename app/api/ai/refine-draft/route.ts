@@ -10,7 +10,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 type RefineRequest = {
   currentDraft: string
   instruction: string
-  language?: 'pt-PT' | 'en'
+  language?: 'pt-PT' | 'en' | 'es'
 }
 
 const SYSTEM_PROMPT_PT = `Revise email draft for Pedro (Kapta, B2B account manager, PT).
@@ -37,6 +37,18 @@ Rules:
 
 Output: revised body ONLY. No preamble, no quotes, no JSON, no "Here is".`
 
+const SYSTEM_PROMPT_ES = `Revise email draft for Pedro (Kapta, B2B account manager, Spain market).
+
+Rules:
+- Pedro instruction > default style. Always. Conflict: instruction wins.
+- Apply literally. "más corto"=cut. "añadir link X"=insert literal X. "más directo"=drop softeners. "menos formal"=drop formal openers.
+- Keep greeting ("Hola X,") unless instruction changes it.
+- No sign-off. Signature appended downstream. Do not add closing.
+- European Spanish (Castellano).
+- No invented facts. Use "[verificar X]" when uncertain.
+
+Output: revised body ONLY. No preamble, no quotes, no JSON, no "Here is".`
+
 export async function POST(req: NextRequest) {
   const denied = requireAuth(req)
   if (denied) return denied
@@ -47,7 +59,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'currentDraft e instruction são obrigatórios.' }, { status: 400 })
   }
 
-  const basePrompt = language === 'en' ? SYSTEM_PROMPT_EN : SYSTEM_PROMPT_PT
+  const basePrompt =
+    language === 'en' ? SYSTEM_PROMPT_EN :
+    language === 'es' ? SYSTEM_PROMPT_ES :
+    SYSTEM_PROMPT_PT
 
   const userMessage = `<current_draft>
 ${currentDraft}

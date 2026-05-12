@@ -49,6 +49,27 @@ Output JSON:
 
 Return ONLY JSON. No markdown. No explanation.`
 
+const SYSTEM_PROMPT_ES = `Compose new email for Pedro (Kapta, B2B account manager, Spain market).
+
+Tone: professional, warm, direct. Not formal. Specific, never generic. European Spanish (Castellano).
+Greeting: "Hola [Nombre]," (first name if known); "Hola," for multiple recipients; "[NOMBRE]" if undecidable.
+Sign-off: appended downstream — DO NOT write closing.
+
+Input: Pedro's brief + recipient list (+ optional <customer_context>).
+
+Rules:
+- Build body from Pedro's brief. Never invent facts.
+- Uncertain value → "[verificar X]".
+- <customer_context> present → reference open tickets / follow-ups / recent meetings naturally.
+- 2-5 short paragraphs. No filler.
+
+Output JSON:
+{ "subject": "...", "body": "..." }
+- subject: concise, descriptive, no "Re:" prefix, <70 chars.
+- body: greeting + content. NO sign-off.
+
+Return ONLY JSON. No markdown. No explanation.`
+
 interface RecipientInput {
   email: string
   name?: string
@@ -58,7 +79,7 @@ interface RecipientInput {
 
 interface ComposeRequest {
   prompt: string
-  language?: 'pt-PT' | 'en'
+  language?: 'pt-PT' | 'en' | 'es'
   recipients: RecipientInput[]
 }
 
@@ -112,7 +133,10 @@ export async function POST(req: Request) {
   ].filter(Boolean).join('\n')
 
   const memory = await getAiMemory()
-  const basePrompt = language === 'en' ? SYSTEM_PROMPT_EN : SYSTEM_PROMPT_PT
+  const basePrompt =
+    language === 'en' ? SYSTEM_PROMPT_EN :
+    language === 'es' ? SYSTEM_PROMPT_ES :
+    SYSTEM_PROMPT_PT
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 

@@ -43,6 +43,24 @@ Rules:
 Output JSON only, no markdown:
 { "subject": "Re: ...", "body": "Hi...\\n\\n..." }`
 
+const SYSTEM_PROMPT_ES = `Write email reply for Pedro (Kapta, B2B account manager, Spain market). Output in European Spanish (Castellano).
+
+INSTRUCTION-FIRST: If <INSTRUCTION> block in user message, that is canonical brief for THIS email. Cover every point in it. Thread is reference only. Do NOT substitute generic follow-up text. Do NOT skip instruction items.
+
+Tone: pro, warm, direct. Not formal. Concise.
+Greeting: "Hola [Nombre],". No sign-off (added downstream).
+
+Rules:
+- Question → answer.
+- Problem → acknowledge + state action.
+- Promise late → apologise + timeline.
+- Max 3-5 short paragraphs. Zero filler. No "!" unless tone needs.
+- Never invent. Unsure → "[verificar X]".
+- <customer_context> → reference open tickets/follow-ups if relevant.
+
+Output JSON only, no markdown:
+{ "subject": "Re: ...", "body": "Hola...\\n\\n..." }`
+
 type AttachmentMeta = { name: string; ai_summary?: string; mime?: string }
 
 function withAttachments(text: string, metadata: Record<string, unknown> | null | undefined): string {
@@ -56,7 +74,7 @@ type DraftRequest = {
   customer_id?: string
   customer_name: string
   customer_company: string | null
-  language?: 'pt-PT' | 'en'
+  language?: 'pt-PT' | 'en' | 'es'
   user_instruction?: string | null
   interactions: Array<{
     type: string
@@ -128,7 +146,10 @@ ${text}`
   // Last subject for Re: prefix
   const lastSubject = interactions.find((i) => i.subject)?.subject ?? ''
 
-  const basePrompt = language === 'en' ? SYSTEM_PROMPT_EN : SYSTEM_PROMPT_PT
+  const basePrompt =
+    language === 'en' ? SYSTEM_PROMPT_EN :
+    language === 'es' ? SYSTEM_PROMPT_ES :
+    SYSTEM_PROMPT_PT
   // Sign-off is appended by the send route as an HTML signature — do not include it in the body
   const signoffInstruction = `Do NOT include a sign-off or closing at the end of the body. End the email after the last sentence of content. The signature will be added automatically.`
 

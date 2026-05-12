@@ -11,7 +11,7 @@ function truncate(s: string | null | undefined, n: number): string {
   return clean.length > n ? clean.slice(0, n) + '…' : clean
 }
 
-export async function buildCustomerContext(customerId: string, language: 'pt-PT' | 'en'): Promise<string | null> {
+export async function buildCustomerContext(customerId: string, language: 'pt-PT' | 'en' | 'es'): Promise<string | null> {
   const supabase = createServiceClient()
 
   const [{ data: customer }, { data: tickets }, { data: followUps }, { data: recent }] = await Promise.all([
