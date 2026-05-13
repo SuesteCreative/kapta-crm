@@ -12,7 +12,8 @@ import { Loader2, Plug, CheckCircle2, AlertTriangle, Pencil } from 'lucide-react
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import {
-  FH_INVOICING_SYSTEMS, FH_STATUS_LABELS, countryFromInvoicingSystem,
+  FH_INVOICING_SYSTEMS, FH_STATUS_LABELS, FH_COUNTRY_ORDER, FH_COUNTRY_LABELS,
+  countryFromInvoicingSystem,
   type FhCountry, type FhIntegrationStatus,
 } from '@/lib/database.types'
 import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
@@ -266,9 +267,9 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
               >
                 <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="PT">Portugal</SelectItem>
-                  <SelectItem value="ES">Espanha</SelectItem>
-                  <SelectItem value="other">Outro</SelectItem>
+                  {FH_COUNTRY_ORDER.map((c) => (
+                    <SelectItem key={c} value={c}>{FH_COUNTRY_LABELS[c]}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

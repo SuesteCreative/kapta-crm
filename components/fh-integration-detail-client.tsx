@@ -19,7 +19,8 @@ import { FollowUpDialog } from '@/components/follow-up-dialog'
 import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
 import { InteractionsTimeline } from '@/components/interactions-timeline'
 import {
-  FH_STATUS_LABELS, FH_STATUS_ORDER, FH_INVOICING_SYSTEMS, countryFromInvoicingSystem,
+  FH_STATUS_LABELS, FH_STATUS_ORDER, FH_INVOICING_SYSTEMS,
+  FH_COUNTRY_ORDER, FH_COUNTRY_LABELS, countryFromInvoicingSystem,
   type FhIntegration, type FhIntegrationStatus, type FhCountry,
   type Interaction, type CustomerIdentifier,
 } from '@/lib/database.types'
@@ -552,9 +553,9 @@ Se tiver alguma questão, não hesite em contactar.`
                 <Select value={form.country || undefined} onValueChange={(v) => setForm({ ...form, country: v as FhCountry })}>
                   <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="PT">Portugal</SelectItem>
-                    <SelectItem value="ES">Espanha</SelectItem>
-                    <SelectItem value="other">Outro</SelectItem>
+                    {FH_COUNTRY_ORDER.map((c) => (
+                      <SelectItem key={c} value={c}>{FH_COUNTRY_LABELS[c]}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

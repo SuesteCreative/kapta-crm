@@ -165,7 +165,47 @@ export interface Ticket {
 export type FhIntegrationStatus =
   | 'new' | 'onboarding' | 'api_received' | 'integration_done'
   | 'live' | 'troubleshoot' | 'follow_up' | 'personalizado' | 'lixo'
-export type FhCountry = 'PT' | 'ES' | 'other'
+export type FhCountry =
+  | 'PT' | 'ES' | 'FR' | 'DE' | 'BE' | 'IT' | 'MX' | 'AE' | 'HU' | 'CR'
+  | 'other'
+
+export const FH_COUNTRY_LABELS: Record<FhCountry, string> = {
+  PT: 'Portugal',
+  ES: 'Espanha',
+  FR: 'França',
+  DE: 'Alemanha',
+  BE: 'Bélgica',
+  IT: 'Itália',
+  MX: 'México',
+  AE: 'Emirados Árabes Unidos',
+  HU: 'Hungria',
+  CR: 'Costa Rica',
+  other: 'Outro',
+}
+
+// Ordered for dropdown display (matches FH onboarding country list)
+export const FH_COUNTRY_ORDER: FhCountry[] = [
+  'PT', 'ES', 'FR', 'DE', 'BE', 'IT', 'MX', 'AE', 'HU', 'CR', 'other',
+]
+
+/** Normalize raw country string (ISO code, EN/PT/ES/native name) → FhCountry.
+ *  Unknown non-empty value → 'other'. Null/empty → null. */
+export function normalizeFhCountry(raw: string | null | undefined): FhCountry | null {
+  if (!raw) return null
+  const v = raw.trim().toLowerCase()
+  if (!v) return null
+  if (['pt', 'portugal'].includes(v)) return 'PT'
+  if (['es', 'spain', 'espana', 'españa', 'espanha'].includes(v)) return 'ES'
+  if (['fr', 'france', 'francia', 'frança', 'franca'].includes(v)) return 'FR'
+  if (['de', 'germany', 'deutschland', 'alemania', 'alemanha'].includes(v)) return 'DE'
+  if (['be', 'belgium', 'belgique', 'belgië', 'belgie', 'belgique / belgië', 'bélgica', 'belgica'].includes(v)) return 'BE'
+  if (['it', 'italy', 'italia', 'itália'].includes(v)) return 'IT'
+  if (['mx', 'mexico', 'méxico'].includes(v)) return 'MX'
+  if (['ae', 'uae', 'united arab emirates', 'emiratos árabes unidos', 'emiratos arabes unidos', 'emirados árabes unidos', 'emirados arabes unidos'].includes(v)) return 'AE'
+  if (['hu', 'hungary', 'hungría', 'hungria'].includes(v)) return 'HU'
+  if (['cr', 'costa rica'].includes(v)) return 'CR'
+  return 'other'
+}
 
 export const FH_INVOICING_SYSTEMS_PT = ['IGEST', 'Moloni', 'InvoiceXpress', 'Vendus'] as const
 export const FH_INVOICING_SYSTEMS_ES = ['Holded', 'Billin', 'Sage'] as const

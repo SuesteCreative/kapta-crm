@@ -1,4 +1,4 @@
-import { countryFromInvoicingSystem, type FhCountry } from './database.types'
+import { countryFromInvoicingSystem, normalizeFhCountry, type FhCountry } from './database.types'
 
 export interface FhIntegrationParsed {
   name?: string
@@ -19,17 +19,14 @@ const RE = {
   // Inline URL: fareharbor.com/embeds/book/<shortname>/ or /api/external/v1/companies/<shortname>/
   shortnameUrl:    /fareharbor\.com\/(?:embeds\/book|api\/external\/v\d+\/companies)\/([A-Za-z0-9_-]+)\/?/i,
   email:           /^[\s>]*(?:Email|E[\- ]?mail)\s*[:\-—]\s*([^\s<>]+@[^\s<>]+)\s*$/im,
-  country:         /^[\s>]*(?:Country|País|Pais)\s*[:\-—]\s*([A-Za-z]{2,})\s*$/im,
+  // Allow multi-word country names ("Costa Rica", "United Arab Emirates", "Belgique / België")
+  country:         /^[\s>]*(?:Country|País|Pais)\s*[:\-—]\s*([^\r\n]+?)\s*$/im,
   invoicingSystem: /^[\s>]*(?:Invoicing\s+System|Sistema\s+de\s+factura(?:ção|cao)|Sistema\s+de\s+faturação)\s*[:\-—]\s*(.+?)\s*$/im,
   authorization:   /^[\s>]*(?:Authorization|Autoriza(?:ção|cao))\s*[:\-—]\s*(Yes|No|Sim|N[ãa]o|True|False)\s*$/im,
 }
 
 function normalizeCountry(raw: string | undefined): FhCountry | undefined {
-  if (!raw) return undefined
-  const v = raw.trim().toUpperCase()
-  if (v === 'PT' || v === 'PORTUGAL') return 'PT'
-  if (v === 'ES' || v === 'SPAIN' || v === 'ESPANHA' || v === 'ESPAÑA') return 'ES'
-  return 'other'
+  return normalizeFhCountry(raw) ?? undefined
 }
 
 function normalizeAuth(raw: string | undefined): boolean | undefined {

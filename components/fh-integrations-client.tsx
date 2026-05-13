@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
 import {
   FH_STATUS_LABELS, FH_STATUS_ORDER,
+  FH_COUNTRY_ORDER, FH_COUNTRY_LABELS, normalizeFhCountry,
   type FhIntegration, type FhIntegrationStatus, type FhCountry,
 } from '@/lib/database.types'
 import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
@@ -54,12 +55,6 @@ const STATUS_STYLES: Record<FhIntegrationStatus, { bg: string; text: string }> =
 
 const PENDING_STYLE = { bg: 'rgba(229,72,77,0.10)', text: '#C0272B' }
 
-const COUNTRY_LABELS: Record<FhCountry, string> = {
-  PT: 'Portugal',
-  ES: 'Espanha',
-  other: 'Outro',
-}
-
 export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: PendingFhEmail[] }) {
   const router = useRouter()
   const [search, setSearch] = useState('')
@@ -75,10 +70,8 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
 
   const filteredPending = useMemo(() => pending.filter((p) => {
     if (countryFilter !== 'all') {
-      const c = (p.country ?? '').toUpperCase()
-      if (countryFilter === 'PT' && c !== 'PT') return false
-      if (countryFilter === 'ES' && c !== 'ES') return false
-      if (countryFilter === 'other' && (c === 'PT' || c === 'ES')) return false
+      const c = normalizeFhCountry(p.country) ?? 'other'
+      if (c !== countryFilter) return false
     }
     if (!q) return true
     return (
@@ -120,9 +113,7 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
       name:            p.name ?? undefined,
       shortname:       p.shortname ?? undefined,
       email:           p.email ?? undefined,
-      country:         (p.country?.toUpperCase() === 'PT' ? 'PT' :
-                        p.country?.toUpperCase() === 'ES' ? 'ES' :
-                        p.country ? 'other' : undefined),
+      country:         normalizeFhCountry(p.country) ?? undefined,
       invoicingSystem: p.invoicing_system ?? undefined,
       authorization:   p.authorization ?? undefined,
     }
@@ -139,10 +130,7 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
     }
     setConverting((s) => ({ ...s, [p.interaction_id]: true }))
     try {
-      const country: FhCountry | null =
-        p.country?.toUpperCase() === 'PT' ? 'PT' :
-        p.country?.toUpperCase() === 'ES' ? 'ES' :
-        p.country ? 'other' : null
+      const country: FhCountry | null = normalizeFhCountry(p.country)
 
       const { fh_integration_id } = await convertPendingToIntegration({
         source_interaction_id: p.interaction_id,
@@ -231,7 +219,7 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
                 {' · '}
               </>
             )}
-            {totalIntegrations} {totalIntegrations === 1 ? 'parceiro ativo' : 'parceiros ativos'} · PT + ES
+            {totalIntegrations} {totalIntegrations === 1 ? 'parceiro ativo' : 'parceiros ativos'}
           </p>
         </div>
       </div>
@@ -251,9 +239,9 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
           <SelectTrigger className="h-9 w-40 text-sm rounded-lg"><SelectValue placeholder="País" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos os países</SelectItem>
-            <SelectItem value="PT">Portugal</SelectItem>
-            <SelectItem value="ES">Espanha</SelectItem>
-            <SelectItem value="other">Outro</SelectItem>
+            {FH_COUNTRY_ORDER.map((c) => (
+              <SelectItem key={c} value={c}>{FH_COUNTRY_LABELS[c]}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -321,9 +309,10 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
                     <div className="flex flex-wrap gap-2 mt-1.5 text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
                       {p.country && (
                         <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
-                          {p.country.toUpperCase() === 'PT' ? 'Portugal'
-                            : p.country.toUpperCase() === 'ES' ? 'Espanha'
-                            : p.country}
+                          {(() => {
+                            const c = normalizeFhCountry(p.country)
+                            return c ? FH_COUNTRY_LABELS[c] : p.country
+                          })()}
                         </span>
                       )}
                       {p.invoicing_system && (
@@ -415,7 +404,7 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
                       <div className="flex flex-wrap gap-2 mt-1.5 text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
                         {r.country && (
                           <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
-                            {COUNTRY_LABELS[r.country]}
+                            {FH_COUNTRY_LABELS[r.country] ?? r.country}
                           </span>
                         )}
                         {r.invoicing_system && (
