@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Search, Plug, CheckCircle2, Inbox, AlertCircle,
-  ChevronRight, Sparkles, Loader2,
+  ChevronRight, Sparkles, Loader2, MailWarning, Mail, FileCheck2,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -27,7 +27,8 @@ type Row = FhIntegration & {
 }
 
 export interface PendingFhEmail {
-  interaction_id: string
+  /** Null when the pending row came only from the FH admin endpoint (no matching email yet). */
+  interaction_id: string | null
   occurred_at: string
   subject: string | null
   name: string | null
@@ -39,6 +40,14 @@ export interface PendingFhEmail {
   parsed: Record<string, unknown>
   forwarded_to_customer: { id: string; name: string; company: string | null } | null
   legacy?: boolean
+  /** Stable id from the FH admin endpoint; null for email-only rows. */
+  fh_admin_id?: number | null
+  /** Endpoint `data_criacao` (when the form was submitted on the admin side). */
+  submitted_at?: string | null
+  /** Whether this row appears in the FH admin endpoint payload. */
+  from_endpoint?: boolean
+  /** Whether this row has a matching flagged IMAP interaction. */
+  from_email?: boolean
 }
 
 const STATUS_STYLES: Record<FhIntegrationStatus, { bg: string; text: string }> = {
@@ -55,12 +64,39 @@ const STATUS_STYLES: Record<FhIntegrationStatus, { bg: string; text: string }> =
 
 const PENDING_STYLE = { bg: 'rgba(229,72,77,0.10)', text: '#C0272B' }
 
-export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: PendingFhEmail[] }) {
+// Source-of-origin badges for pending rows.
+const SOURCE_STYLES = {
+  both:     { bg: 'rgba(45,185,117,0.10)', text: '#1a9e6c', label: 'Form + Email' },
+  endpoint: { bg: 'rgba(245,158,11,0.10)', text: '#B45309', label: 'Form (email atrasado)' },
+  email:    { bg: 'rgba(229,72,77,0.10)',  text: '#C0272B', label: 'Email (não está no admin)' },
+} as const
+
+function sourceKey(p: PendingFhEmail): 'both' | 'endpoint' | 'email' {
+  if (p.from_endpoint && p.from_email) return 'both'
+  if (p.from_endpoint) return 'endpoint'
+  return 'email'
+}
+
+// Stable id for state maps + React keys: endpoint id when available,
+// otherwise the linked interaction id, otherwise an email+shortname fallback.
+function pendingKey(p: PendingFhEmail): string {
+  if (p.fh_admin_id != null) return `admin:${p.fh_admin_id}`
+  if (p.interaction_id) return `int:${p.interaction_id}`
+  return `fallback:${p.email ?? ''}:${p.shortname ?? ''}`
+}
+
+export function FhIntegrationsClient({
+  rows, pending, endpointError,
+}: {
+  rows: Row[]
+  pending: PendingFhEmail[]
+  endpointError?: string | null
+}) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [countryFilter, setCountryFilter] = useState<'all' | FhCountry>('all')
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [dialogCtx, setDialogCtx] = useState<{ sourceId: string; prefill: FhIntegrationParsed | null } | null>(null)
+  const [dialogCtx, setDialogCtx] = useState<{ sourceId: string | null; prefill: FhIntegrationParsed | null } | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [statusSaving, setStatusSaving] = useState<Record<string, boolean>>({})
   const [aiSuggesting, setAiSuggesting] = useState<Record<string, boolean>>({})
@@ -128,7 +164,8 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
       openPendingDialog(p)
       return
     }
-    setConverting((s) => ({ ...s, [p.interaction_id]: true }))
+    const key = pendingKey(p)
+    setConverting((s) => ({ ...s, [key]: true }))
     try {
       const country: FhCountry | null = normalizeFhCountry(p.country)
 
@@ -146,7 +183,7 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
       router.push(`/fareharbor/${fh_integration_id}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao converter.')
-      setConverting((s) => ({ ...s, [p.interaction_id]: false }))
+      setConverting((s) => ({ ...s, [key]: false }))
     }
   }
 
@@ -246,6 +283,20 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
         </Select>
       </div>
 
+      {/* Endpoint failure banner — keeps page working if the admin pull errored. */}
+      {endpointError && (
+        <div
+          className="rounded-xl p-3 text-[12.5px] flex items-start gap-2"
+          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', color: '#B45309' }}
+        >
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium">Não foi possível ler o admin FareHarbor.</p>
+            <p className="opacity-80">{endpointError} A lista abaixo mostra apenas os pedidos que chegaram por email.</p>
+          </div>
+        </div>
+      )}
+
       {/* Pending — top, always-rendered accordion (if any) */}
       {filteredPending.length > 0 && (
         <AccordionSection
@@ -257,10 +308,14 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
           onToggle={() => toggleSection('__pending')}
         >
           {filteredPending.map((p) => {
-            const isConverting = converting[p.interaction_id]
+            const key = pendingKey(p)
+            const isConverting = converting[key]
+            const src = sourceKey(p)
+            const srcStyle = SOURCE_STYLES[src]
+            const SrcIcon = src === 'both' ? FileCheck2 : src === 'endpoint' ? MailWarning : Mail
             return (
               <div
-                key={p.interaction_id}
+                key={key}
                 className="rounded-xl p-5 transition-colors"
                 style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', border: `1px solid ${PENDING_STYLE.text}33` }}
               >
@@ -307,6 +362,19 @@ export function FhIntegrationsClient({ rows, pending }: { rows: Row[]; pending: 
                       </p>
                     )}
                     <div className="flex flex-wrap gap-2 mt-1.5 text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
+                      <span
+                        className="rounded-full px-2 py-0.5 inline-flex items-center gap-1 font-medium"
+                        style={{ background: srcStyle.bg, color: srcStyle.text }}
+                        title={
+                          src === 'both'
+                            ? 'Pedido presente no admin FareHarbor e com email recebido — match completo.'
+                            : src === 'endpoint'
+                              ? 'No admin FareHarbor mas sem email correspondente. Pode estar atrasado no IMAP ou perdido no spam.'
+                              : 'Email recebido mas não encontrado no admin FareHarbor. Pode não ter sido submetido via formulário ou foi removido.'
+                        }
+                      >
+                        <SrcIcon className="h-3 w-3" /> {srcStyle.label}
+                      </span>
                       {p.country && (
                         <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
                           {(() => {

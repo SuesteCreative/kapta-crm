@@ -205,7 +205,8 @@ export async function resolveOrCreateCustomerForFh(input: ResolveCustomerInput):
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface ConvertPendingInput {
-  source_interaction_id: string
+  /** Null when the pending row came from the FH admin endpoint and no matching email was found. */
+  source_interaction_id: string | null
   name: string
   email: string
   shortname: string
@@ -257,14 +258,16 @@ export async function convertPendingToIntegration(input: ConvertPendingInput): P
   if (fhErr || !fh) throw new Error(fhErr?.message || 'Erro ao criar integração.')
   const newId = fh.id as string
 
-  // Back-link the source email
-  const { data: existing } = await supabase
-    .from('interactions')
-    .select('metadata')
-    .eq('id', input.source_interaction_id)
-    .maybeSingle()
-  const merged = { ...(existing?.metadata ?? {}), fh_integration_id: newId }
-  await supabase.from('interactions').update({ metadata: merged }).eq('id', input.source_interaction_id)
+  // Back-link the source email (skip when this came from the FH admin endpoint with no email match)
+  if (input.source_interaction_id) {
+    const { data: existing } = await supabase
+      .from('interactions')
+      .select('metadata')
+      .eq('id', input.source_interaction_id)
+      .maybeSingle()
+    const merged = { ...(existing?.metadata ?? {}), fh_integration_id: newId }
+    await supabase.from('interactions').update({ metadata: merged }).eq('id', input.source_interaction_id)
+  }
 
   return { fh_integration_id: newId }
 }
