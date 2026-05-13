@@ -66,15 +66,63 @@ export function isFhIntegrationEmail(
   subject: string | null | undefined,
   body: string | null | undefined,
 ): boolean {
-  if (!body) return false
-
-  // Strong signal: body has both Shortname and Email fields (template-shaped).
-  const hasShortname = RE.shortname.test(body)
-  const hasEmail     = RE.email.test(body)
-  if (hasShortname && hasEmail) return true
-
-  // Weak fallback: sender + subject match (covers edge cases where shortname is missing).
+  // Form submissions always come from site@kapta.pt. Reply emails (e.g. partner
+  // replying to a confirmation) often QUOTE the original template in the body,
+  // which used to trigger the strong signal — gating on sender removes that
+  // false positive class entirely.
   const fromMatches = !!fromAddress && /^site@kapta\.pt$/i.test(fromAddress.trim())
-  const subjMatches = !!subject && /fare\s*harbor.*integration|integration.*fare\s*harbor/i.test(subject)
-  return fromMatches && subjMatches
+  if (!fromMatches) return false
+
+  // Either body template OR subject is enough once we know it's from site@.
+  if (body && RE.shortname.test(body) && RE.email.test(body)) return true
+  if (subject && /fare\s*harbor.*integration|integration.*fare\s*harbor/i.test(subject)) return true
+  return false
+}
+
+// ============================================================
+// Confirmation-email handling
+// "Olá <Name>, A sua integração com a Kapta está concluída.
+//  Pode agora aceder à sua conta e prosseguir para: https://rioko.pt"
+// Sent FROM notificacoes@kapta.pt (external system, not the CRM) to the partner.
+// ============================================================
+
+export interface FhConfirmationParsed {
+  name?: string
+  email?: string
+}
+
+const CONFIRM_RE = {
+  // "Olá NAME," — the name line that opens the message.
+  greeting: /^[\s>]*Ol[áa]\s+([^,\r\n]+?)\s*,/im,
+  // The completion sentence (with or without accents).
+  body: /a sua integra[çc][ãa]o com a kapta est[áa] conclu[íi]da/i,
+  rioko: /rioko\.pt/i,
+}
+
+export function isFhConfirmationEmail(
+  fromAddress: string | null | undefined,
+  body: string | null | undefined,
+): boolean {
+  if (!body) return false
+  const fromMatches = !!fromAddress && /^notificacoes@kapta\.pt$/i.test(fromAddress.trim())
+  if (!fromMatches) return false
+  return CONFIRM_RE.body.test(body) && CONFIRM_RE.rioko.test(body)
+}
+
+export function parseFhConfirmationEmail(
+  body: string | null | undefined,
+  toEmail: string | null | undefined,
+): FhConfirmationParsed {
+  const out: FhConfirmationParsed = {}
+  if (body) {
+    const name = body.match(CONFIRM_RE.greeting)?.[1]?.trim()
+    if (name) out.name = name
+  }
+  if (toEmail) {
+    const e = toEmail.trim().toLowerCase()
+    if (e && !/^notificacoes@kapta\.pt$/i.test(e) && !/@kapta\.pt$/i.test(e)) {
+      out.email = e
+    }
+  }
+  return out
 }

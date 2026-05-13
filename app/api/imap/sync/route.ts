@@ -4,7 +4,10 @@ import { simpleParser, ParsedMail } from 'mailparser'
 import { createServiceClient } from '@/lib/supabase'
 import { analyzeAttachment } from '@/lib/analyze-attachment'
 import { decodeLegacyEmailContent, looksLikeLegacyEmail } from '@/lib/decode-legacy-email'
-import { isFhIntegrationEmail, parseFhIntegrationEmail } from '@/lib/fh-integration-parser'
+import {
+  isFhIntegrationEmail, parseFhIntegrationEmail,
+  isFhConfirmationEmail, parseFhConfirmationEmail,
+} from '@/lib/fh-integration-parser'
 import { extractForwardedSender } from '@/lib/email-utils'
 import { isSpamSender } from '@/lib/spam-filter'
 import { randomUUID } from 'crypto'
@@ -406,6 +409,34 @@ export async function GET(req: NextRequest) {
             }
           }
 
+          // FH form submissions (site@kapta.pt) carry the partner email in body fields
+          // ("Email: cmo@dunacruises.com"), not in any From: header. Likewise the
+          // notificacoes@kapta.pt confirmation goes TO the partner. Extract the partner
+          // from body/TO so the interaction gets linked to the partner's customer row.
+          if (!primarySenderEmail && bodyText && allFromAreTeam) {
+            const fromAddr = (fromList[0]?.address ?? '').toLowerCase().trim()
+            const subj = parsed.subject ?? null
+
+            if (/^site@kapta\.pt$/i.test(fromAddr) && isFhIntegrationEmail(fromAddr, subj, bodyText)) {
+              const fhP = parseFhIntegrationEmail(bodyText)
+              if (fhP.email && !isInternal(fhP.email)) {
+                primarySenderEmail = fhP.email
+                primarySenderName  = fhP.name || fhP.email.split('@')[0]
+                const found = emailToCustomerId.get(fhP.email)
+                if (found) { customerId = found; matchedEmail = fhP.email }
+              }
+            } else if (/^notificacoes@kapta\.pt$/i.test(fromAddr) && isFhConfirmationEmail(fromAddr, bodyText)) {
+              const recipient = toList.find((a) => a.address && !isInternal(a.address.toLowerCase().trim()))?.address?.toLowerCase().trim() ?? null
+              const confP = parseFhConfirmationEmail(bodyText, recipient)
+              if (confP.email) {
+                primarySenderEmail = confP.email
+                primarySenderName  = confP.name || confP.email.split('@')[0]
+                const found = emailToCustomerId.get(confP.email)
+                if (found) { customerId = found; matchedEmail = confP.email }
+              }
+            }
+          }
+
           if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail && isAutomatedSender(primarySenderEmail)) {
             unknown++; continue
           }
@@ -488,6 +519,35 @@ export async function GET(req: NextRequest) {
           const isFh = isFhIntegrationEmail(fromForFh, subject, bodyText)
           const fhParsed = isFh ? parseFhIntegrationEmail(bodyText) : null
 
+          // FH confirmation email (notificacoes@kapta.pt → partner). Two outcomes:
+          //  - Existing fh_integration for this partner → bump status to integration_done
+          //  - No matching integration → fall through to flag as pending so it shows
+          //    in /fareharbor "Por contactar" (Pedro creates the integration manually).
+          const isFhConfirm = isFhConfirmationEmail(fromForFh, bodyText)
+          let fhConfirmBumpedId: string | null = null
+          if (isFhConfirm && primarySenderEmail) {
+            const { data: existingFh } = await supabase
+              .from('fh_integrations')
+              .select('id, status, integration_completed_at')
+              .eq('email', primarySenderEmail)
+              .maybeSingle()
+            if (existingFh) {
+              fhConfirmBumpedId = existingFh.id
+              const nextStatus = existingFh.status === 'live' ? 'live' : 'integration_done'
+              await supabase
+                .from('fh_integrations')
+                .update({
+                  status: nextStatus,
+                  integration_completed_at: existingFh.integration_completed_at ?? date.toISOString(),
+                })
+                .eq('id', existingFh.id)
+            }
+          }
+          const fhConfirmParsed = isFhConfirm
+            ? parseFhConfirmationEmail(bodyText, primarySenderEmail)
+            : null
+          const shouldFlagConfirmAsPending = isFhConfirm && !fhConfirmBumpedId
+
           // Troubleshoot hint: inbound email from a partner with active FH
           // integration that mentions trouble keywords. Hint-only — Pedro
           // decides whether to flip status manually.
@@ -536,6 +596,12 @@ export async function GET(req: NextRequest) {
               parsed_version: 'mailparser-1',
               ...(bodyHtml ? { html: bodyHtml } : {}),
               ...(isFh ? { fh_integration_request: true, fh_parsed: fhParsed } : {}),
+              ...(shouldFlagConfirmAsPending ? {
+                fh_integration_request: true,
+                fh_confirmation: true,
+                fh_parsed: { email: primarySenderEmail, name: fhConfirmParsed?.name ?? null },
+              } : {}),
+              ...(fhConfirmBumpedId ? { fh_confirmation_bumped: fhConfirmBumpedId } : {}),
               ...(troubleshootHint ? { fh_troubleshoot_hint: true, fh_troubleshoot_match: troubleshootMatch } : {}),
             },
             is_read:     effectiveDirection === 'outbound',
