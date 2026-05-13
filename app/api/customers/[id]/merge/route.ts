@@ -15,13 +15,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: false, error: 'source_id inválido' }, { status: 400 })
   }
 
-  // Move child records
-  const [r1, r2, r3] = await Promise.all([
+  // Move child records (all tables with customer_id FK to customers).
+  // fh_integrations and email_drafts use ON DELETE SET NULL, so reassign
+  // them here so the merge doesn't drop the link.
+  const [r1, r2, r3, r4, r5] = await Promise.all([
     supabase.from('interactions').update({ customer_id: targetId }).eq('customer_id', source_id),
     supabase.from('follow_ups').update({ customer_id: targetId }).eq('customer_id', source_id),
     supabase.from('tickets').update({ customer_id: targetId }).eq('customer_id', source_id),
+    supabase.from('fh_integrations').update({ customer_id: targetId }).eq('customer_id', source_id),
+    supabase.from('email_drafts').update({ primary_customer_id: targetId }).eq('primary_customer_id', source_id),
   ])
-  const moveError = r1.error ?? r2.error ?? r3.error
+  const moveError = r1.error ?? r2.error ?? r3.error ?? r4.error ?? r5.error
   if (moveError) return NextResponse.json({ ok: false, error: moveError.message }, { status: 500 })
 
   // Move identifiers — skip duplicates

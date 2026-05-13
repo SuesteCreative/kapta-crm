@@ -6,6 +6,7 @@ import { analyzeAttachment } from '@/lib/analyze-attachment'
 import { decodeLegacyEmailContent, looksLikeLegacyEmail } from '@/lib/decode-legacy-email'
 import { isFhIntegrationEmail, parseFhIntegrationEmail } from '@/lib/fh-integration-parser'
 import { extractForwardedSender } from '@/lib/email-utils'
+import { isSpamSender } from '@/lib/spam-filter'
 import { randomUUID } from 'crypto'
 
 export const dynamic = 'force-dynamic'
@@ -406,6 +407,17 @@ export async function GET(req: NextRequest) {
           }
 
           if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail && isAutomatedSender(primarySenderEmail)) {
+            unknown++; continue
+          }
+
+          // Spam/scam filter — drop obvious phishing + dropshipping marketing
+          // before creating a customer row. Only applies when we have no existing
+          // customer match (so legitimate replies on threads keep flowing).
+          if (
+            !customerId &&
+            effectiveDirection === 'inbound' &&
+            isSpamSender(primarySenderName || fromList[0]?.name, primarySenderEmail)
+          ) {
             unknown++; continue
           }
 
