@@ -7,35 +7,30 @@ import { parseFhIntegrationEmail } from '@/lib/fh-integration-parser'
 export default async function FareHarborPage() {
   const supabase = createServiceClient()
 
-  // Three queries:
-  //   integrations   — existing fh_integrations rows
-  //   flaggedRes     — emails marked by sync (metadata.fh_integration_request)
-  //   contentRes     — broader: any inbound email mentioning "fareharbor" in subject/body
-  //                    (covers legacy form requests AND ongoing FH-related conversations
-  //                    that aren't structured form submissions)
-  const [integrationsRes, flaggedRes, contentRes] = await Promise.all([
+  // Pending source: emails flagged by sync (template-shaped FH form submissions)
+  // or manually flagged via /api/fareharbor/flag-email, that haven't been converted yet.
+  const [integrationsRes, flaggedRes] = await Promise.all([
     supabase
       .from('fh_integrations')
-      .select('*, customers(id, name, company)')
+      .select('*, customers(id, name, company, company_id)')
       .order('created_at', { ascending: false }),
     supabase
       .from('interactions')
-      .select('id, subject, content, occurred_at, customer_id, metadata, customers(id, name, company, customer_identifiers(type, value, is_primary))')
+      .select('id, subject, content, occurred_at, customer_id, metadata, customers(id, name, company, company_id, customer_identifiers(type, value, is_primary))')
       .eq('metadata->>fh_integration_request', 'true')
       .is('metadata->>fh_integration_id', null)
       .order('occurred_at', { ascending: false }),
-    supabase
-      .from('interactions')
-      .select('id, subject, content, occurred_at, direction, customer_id, metadata, customers(id, name, company, customer_identifiers(type, value, is_primary))')
-      .eq('type', 'email')
-      .eq('direction', 'inbound')
-      .or('subject.ilike.%fareharbor%,subject.ilike.%fare harbor%,subject.ilike.%fareharbour%,content.ilike.%fareharbor%,content.ilike.%fareharbour%,content.ilike.%fare harbor%')
-      .order('occurred_at', { ascending: false })
-      .limit(1000),
   ])
 
   type Identifier = { type: string; value: string; is_primary: boolean }
-  type CustomerWithIds = { id: string; name: string; company: string | null; customer_identifiers?: Identifier[] }
+  type CustomerWithIds = { id: string; name: string; company: string | null; company_id: string | null; customer_identifiers?: Identifier[] }
+  type FhIntegrationRow = { email: string | null; customer_id: string | null; customers: { company: string | null; company_id: string | null } | { company: string | null; company_id: string | null }[] | null }
+
+  function normalizeCompanyName(name: string | null | undefined): string | null {
+    if (!name) return null
+    const v = name.trim().toLowerCase().replace(/\s+/g, ' ')
+    return v ? v : null
+  }
   type Raw = {
     id: string
     subject: string | null
@@ -57,25 +52,42 @@ export default async function FareHarborPage() {
     return (primary?.value ?? list[0]?.value ?? null)?.toLowerCase().trim() ?? null
   }
 
-  // Dedup sets from existing integrations
+  // Dedup sets from existing integrations.
+  // We dedup by email + customer_id + company_id + company-name + email-domain.
+  // Replies in long threads often quote the original FH form template, so sync
+  // re-flags them; the company-level dedup catches "same-company-different-contact"
+  // cases (Paulo or Luís emailing from @agexpeditions.pt when AgExpeditions
+  // already has an integration). Company-name (text) is the most universally
+  // populated — company_id FK is often null on legacy customers.
   const existingEmails = new Set<string>()
   const existingCustomerIds = new Set<string>()
-  for (const i of integrationsRes.data ?? []) {
-    if (i.email) existingEmails.add(i.email.toLowerCase().trim())
+  const existingCompanyIds = new Set<string>()
+  const existingCompanyNames = new Set<string>()
+  const existingDomains = new Set<string>()
+  const PERSONAL_DOMAINS = new Set([
+    'gmail.com', 'hotmail.com', 'outlook.com', 'live.com', 'yahoo.com',
+    'icloud.com', 'me.com', 'aol.com', 'protonmail.com', 'proton.me',
+    'sapo.pt', 'iol.pt', 'clix.pt',
+  ])
+  for (const i of (integrationsRes.data ?? []) as FhIntegrationRow[]) {
+    if (i.email) {
+      const e = i.email.toLowerCase().trim()
+      existingEmails.add(e)
+      const domain = e.split('@')[1]
+      if (domain && !PERSONAL_DOMAINS.has(domain)) existingDomains.add(domain)
+    }
     if (i.customer_id) existingCustomerIds.add(i.customer_id)
+    const c = Array.isArray(i.customers) ? i.customers[0] : i.customers
+    if (c?.company_id) existingCompanyIds.add(c.company_id)
+    const cn = normalizeCompanyName(c?.company)
+    if (cn) existingCompanyNames.add(cn)
   }
 
-  // Merge candidates, dedup by interaction id
+  // Dedup by interaction id (one source now, but defensive)
   const seenInteractions = new Set<string>()
   const candidates: Raw[] = []
   for (const r of (flaggedRes.data ?? []) as Raw[]) {
     if (seenInteractions.has(r.id)) continue
-    seenInteractions.add(r.id); candidates.push(r)
-  }
-  for (const r of (contentRes.data ?? []) as Raw[]) {
-    if (seenInteractions.has(r.id)) continue
-    const md = (r.metadata ?? {}) as Record<string, unknown>
-    if (md.fh_integration_id) continue // already converted
     seenInteractions.add(r.id); candidates.push(r)
   }
 
@@ -101,6 +113,11 @@ export default async function FareHarborPage() {
     if (/@kapta\.pt$/i.test(senderEmail)) continue
     if (existingEmails.has(senderEmail)) continue
     if (customer?.id && existingCustomerIds.has(customer.id)) continue
+    if (customer?.company_id && existingCompanyIds.has(customer.company_id)) continue
+    const candidateCompanyName = normalizeCompanyName(customer?.company)
+    if (candidateCompanyName && existingCompanyNames.has(candidateCompanyName)) continue
+    const senderDomain = senderEmail.split('@')[1]
+    if (senderDomain && !PERSONAL_DOMAINS.has(senderDomain) && existingDomains.has(senderDomain)) continue
 
     const fwCustomer = customer ? { id: customer.id, name: customer.name, company: customer.company } : null
     const occurredMs = new Date(row.occurred_at).getTime()

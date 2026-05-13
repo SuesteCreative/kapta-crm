@@ -275,6 +275,26 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
     setFhOpen(true)
   }
 
+  const [fhFlagLoading, setFhFlagLoading] = useState(false)
+  async function toggleFhFlag(email: EmailRow, action: 'flag' | 'unflag') {
+    setFhFlagLoading(true)
+    try {
+      const res = await fetch('/api/fareharbor/flag-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interaction_id: email.id, action }),
+      })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error ?? 'Erro')
+      toast.success(action === 'flag' ? 'Marcado como pedido FH' : 'Pedido FH desmarcado')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao atualizar.')
+    } finally {
+      setFhFlagLoading(false)
+    }
+  }
+
   function selectStaleThread(t: StaleThread) {
     setSelectedId(t.id)
     dismissStaleBanner()
@@ -968,18 +988,18 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                         : <TicketIcon className="h-3 w-3" />}
                       Ticket
                     </button>
-                    {selected.metadata?.fh_integration_request === true && (
-                      selected.metadata?.fh_integration_id ? (
-                        <button
-                          onClick={() => router.push(`/fareharbor/${selected.metadata!.fh_integration_id as string}`)}
-                          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70"
-                          style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)', border: '1px solid rgba(91,91,214,0.3)' }}
-                          title="Abrir integração FareHarbor"
-                        >
-                          <Plug className="h-3 w-3" />
-                          Ver FH
-                        </button>
-                      ) : (
+                    {selected.metadata?.fh_integration_id ? (
+                      <button
+                        onClick={() => router.push(`/fareharbor/${selected.metadata!.fh_integration_id as string}`)}
+                        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70"
+                        style={{ background: 'rgba(91,91,214,0.1)', color: 'var(--primary)', border: '1px solid rgba(91,91,214,0.3)' }}
+                        title="Abrir integração FareHarbor"
+                      >
+                        <Plug className="h-3 w-3" />
+                        Ver FH
+                      </button>
+                    ) : selected.metadata?.fh_integration_request === true ? (
+                      <>
                         <button
                           onClick={() => openFhIntegration(selected)}
                           className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70"
@@ -989,7 +1009,27 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                           <Plug className="h-3 w-3" />
                           FH
                         </button>
-                      )
+                        <button
+                          onClick={() => toggleFhFlag(selected, 'unflag')}
+                          disabled={fhFlagLoading}
+                          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70 disabled:opacity-40"
+                          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
+                          title="Remover este email da lista 'Por contactar' do FareHarbor"
+                        >
+                          {fhFlagLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Desmarcar FH'}
+                        </button>
+                      </>
+                    ) : isInbound && (
+                      <button
+                        onClick={() => toggleFhFlag(selected, 'flag')}
+                        disabled={fhFlagLoading}
+                        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-70 disabled:opacity-40"
+                        style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                        title="Marcar este email como pedido de integração FareHarbor (aparece em 'Por contactar')"
+                      >
+                        {fhFlagLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plug className="h-3 w-3" />}
+                        Marcar FH
+                      </button>
                     )}
                     <button
                       onClick={() => openFollowUp(selected)}
