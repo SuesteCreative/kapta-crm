@@ -18,6 +18,15 @@ export async function POST(req: NextRequest) {
     .digest('hex')
 
   if (email !== authEmail || inputHash !== storedHash) {
+    // TEMP DIAG — remove after login recovery
+    console.log('[auth-diag] email_match:', email === authEmail, 'hash_match:', inputHash === storedHash)
+    console.log('[auth-diag] env_email_len:', authEmail?.length, 'input_email_len:', email?.length)
+    console.log('[auth-diag] env_secret_len:', secret?.length, 'env_hash_len:', storedHash?.length)
+    console.log('[auth-diag] input_password_len:', password?.length)
+    console.log('[auth-diag] computed_hash:', inputHash)
+    console.log('[auth-diag] stored_hash  :', storedHash)
+    console.log('[auth-diag] env_email_raw:', JSON.stringify(authEmail))
+    console.log('[auth-diag] input_email_raw:', JSON.stringify(email))
     return NextResponse.json({ error: 'Credenciais inválidas' }, { status: 401 })
   }
 
