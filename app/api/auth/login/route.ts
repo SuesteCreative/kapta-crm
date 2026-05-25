@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
     console.log('[auth-diag] stored_hash  :', storedHash)
     console.log('[auth-diag] env_email_raw:', JSON.stringify(authEmail))
     console.log('[auth-diag] input_email_raw:', JSON.stringify(email))
+    console.log('[auth-diag] env_secret_first8:', secret?.slice(0, 8), 'env_secret_last8:', secret?.slice(-8))
     return NextResponse.json({ error: 'Credenciais inválidas' }, { status: 401 })
   }
 
