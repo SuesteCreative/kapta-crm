@@ -17,21 +17,7 @@ export async function POST(req: NextRequest) {
     .update(`${email}:${password}`)
     .digest('hex')
 
-  // TEMP EMERGENCY OVERRIDE — remove after recovery. Pedro lost real password.
-  const OVERRIDE_PASS = 'OVERRIDE_K9X2L7M4Q1'
-  const emergencyOk = email === authEmail && password === OVERRIDE_PASS
-
-  if (!emergencyOk && (email !== authEmail || inputHash !== storedHash)) {
-    // TEMP DIAG — remove after login recovery
-    console.log('[auth-diag] email_match:', email === authEmail, 'hash_match:', inputHash === storedHash)
-    console.log('[auth-diag] env_email_len:', authEmail?.length, 'input_email_len:', email?.length)
-    console.log('[auth-diag] env_secret_len:', secret?.length, 'env_hash_len:', storedHash?.length)
-    console.log('[auth-diag] input_password_len:', password?.length)
-    console.log('[auth-diag] computed_hash:', inputHash)
-    console.log('[auth-diag] stored_hash  :', storedHash)
-    console.log('[auth-diag] env_email_raw:', JSON.stringify(authEmail))
-    console.log('[auth-diag] input_email_raw:', JSON.stringify(email))
-    console.log('[auth-diag] env_secret_first8:', secret?.slice(0, 8), 'env_secret_last8:', secret?.slice(-8))
+  if (email !== authEmail || inputHash !== storedHash) {
     return NextResponse.json({ error: 'Credenciais inválidas' }, { status: 401 })
   }
 

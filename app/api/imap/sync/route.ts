@@ -10,6 +10,7 @@ import {
 } from '@/lib/fh-integration-parser'
 import { extractForwardedSender } from '@/lib/email-utils'
 import { isSpamSender } from '@/lib/spam-filter'
+import { detectPlatforms } from '@/lib/platform-detector'
 import { randomUUID } from 'crypto'
 
 export const dynamic = 'force-dynamic'
@@ -584,6 +585,8 @@ export async function GET(req: NextRequest) {
             }
           }
 
+          const detectedPlatforms = detectPlatforms(subject, bodyText, fromForFh)
+
           buffer.push({
             customer_id: customerId,
             type:        'email',
@@ -603,6 +606,7 @@ export async function GET(req: NextRequest) {
               } : {}),
               ...(fhConfirmBumpedId ? { fh_confirmation_bumped: fhConfirmBumpedId } : {}),
               ...(troubleshootHint ? { fh_troubleshoot_hint: true, fh_troubleshoot_match: troubleshootMatch } : {}),
+              ...(detectedPlatforms.length > 0 ? { detected_platforms: detectedPlatforms } : {}),
             },
             is_read:     effectiveDirection === 'outbound',
             occurred_at: date.toISOString(),

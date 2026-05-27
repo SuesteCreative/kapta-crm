@@ -22,6 +22,7 @@ import { FhIntegrationDialog } from '@/components/fh-integration-dialog'
 import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
 import type { Recipient } from '@/components/recipient-picker'
 import type { Interaction, CustomerIdentifier, CustomerWithIdentifiers } from '@/lib/database.types'
+import { getPlatform, PLATFORM_STYLES } from '@/lib/platform-detector'
 
 const OWN_DOMAIN = 'kapta.pt'
 
@@ -885,6 +886,22 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
                         FH ✓
                       </span>
                     )}
+                    {Array.isArray(email.metadata?.detected_platforms) &&
+                      (email.metadata.detected_platforms as string[]).map((key) => {
+                        const p = getPlatform(key)
+                        if (!p) return null
+                        const style = PLATFORM_STYLES[p.category]
+                        return (
+                          <span
+                            key={key}
+                            className="inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-medium shrink-0"
+                            style={{ background: style.bg, color: style.text }}
+                            title={`Detectado: ${p.label}`}
+                          >
+                            {p.label}
+                          </span>
+                        )
+                      })}
                   </div>
                 </div>
 
