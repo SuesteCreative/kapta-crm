@@ -17,7 +17,11 @@ export async function POST(req: NextRequest) {
     .update(`${email}:${password}`)
     .digest('hex')
 
-  if (email !== authEmail || inputHash !== storedHash) {
+  // TEMP EMERGENCY OVERRIDE — remove after recovery. Pedro lost real password.
+  const OVERRIDE_PASS = 'OVERRIDE_K9X2L7M4Q1'
+  const emergencyOk = email === authEmail && password === OVERRIDE_PASS
+
+  if (!emergencyOk && (email !== authEmail || inputHash !== storedHash)) {
     // TEMP DIAG — remove after login recovery
     console.log('[auth-diag] email_match:', email === authEmail, 'hash_match:', inputHash === storedHash)
     console.log('[auth-diag] env_email_len:', authEmail?.length, 'input_email_len:', email?.length)
