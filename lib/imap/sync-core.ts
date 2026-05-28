@@ -126,6 +126,96 @@ export type SyncOptions = {
   maxEmails?: number
 }
 
+/**
+ * Cheap envelope-only count of how many candidate emails a full sync would
+ * need to process. Called once at the start of an Inngest chain so the UI
+ * progress bar has a denominator. ~5-10s for inboxes with thousands of
+ * historical messages — connects to IMAP, lists envelopes since the same
+ * cut-off as runImapSync(), dedupes against DB.
+ */
+export async function countPendingCandidates(): Promise<{
+  total: number
+  syncSince: string
+  error?: string
+}> {
+  const supabase = createServiceClient()
+
+  const { data: latestEmail } = await supabase
+    .from('interactions')
+    .select('occurred_at')
+    .eq('type', 'email')
+    .order('occurred_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  const syncSince = latestEmail?.occurred_at
+    ? new Date(new Date(latestEmail.occurred_at).getTime() - 24 * 60 * 60 * 1000)
+    : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+
+  const dedupSince = new Date(syncSince.getTime() - 2 * 24 * 60 * 60 * 1000)
+  const { data: existingRows } = await supabase
+    .from('interactions')
+    .select('source_id')
+    .not('source_id', 'is', null)
+    .gte('occurred_at', dedupSince.toISOString())
+
+  const existingSourceIds = new Set<string>()
+  for (const row of existingRows ?? []) {
+    if (row.source_id) existingSourceIds.add(row.source_id)
+  }
+
+  const client = new ImapFlow({
+    host: process.env.IMAP_HOST!,
+    port: Number(process.env.IMAP_PORT ?? 993),
+    secure: true,
+    auth: { user: process.env.IMAP_USER!, pass: process.env.IMAP_PASSWORD! },
+    tls: { rejectUnauthorized: false },
+    logger: false,
+  })
+
+  try {
+    await client.connect()
+
+    let sentPath = 'Sent'
+    try {
+      const allBoxes = await client.list()
+      const sentBox = allBoxes.find((b) =>
+        (b as unknown as Record<string, unknown>).specialUse === '\\Sent' ||
+        /^(sent|sent messages|sent items|itens enviados|\[gmail\]\/sent mail|gesendet|éléments envoyés)$/i.test(b.name)
+      )
+      if (sentBox) sentPath = sentBox.path
+    } catch { /* keep default */ }
+
+    let total = 0
+    for (const path of ['INBOX', sentPath]) {
+      let lock
+      try { lock = await client.getMailboxLock(path) } catch { continue }
+      try {
+        const searchResult = await client.search({ since: syncSince }, { uid: true })
+        const allUids = searchResult === false ? [] : searchResult
+        if (allUids.length === 0) continue
+
+        for await (const msg of client.fetch([...allUids].reverse().slice(0, 2000), {
+          uid: true, envelope: true,
+        }, { uid: true })) {
+          const messageId = msg.envelope?.messageId
+          if (!messageId) continue
+          if (existingSourceIds.has(messageId)) continue
+          total++
+        }
+      } finally {
+        lock.release()
+      }
+    }
+
+    await client.logout()
+    return { total, syncSince: syncSince.toISOString() }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    return { total: 0, syncSince: syncSince.toISOString(), error: msg }
+  }
+}
+
 export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult> {
   const maxEmails = options.maxEmails ?? 1000
   const supabase = createServiceClient()
