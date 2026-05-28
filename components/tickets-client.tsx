@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import dynamic from 'next/dynamic'
 import { Copy, Check, Sparkles, Loader2, Users, Mail, MessageCircle, X, ChevronDown, ChevronUp, Search, CheckCircle2 } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -137,8 +137,25 @@ function ticketToWhatsApp(t: TicketWithCustomer): string {
   return lines.join('\n')
 }
 
-export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
-  const router = useRouter()
+export const TICKETS_LIST_QUERY_KEY = ['tickets', 'list'] as const
+
+async function fetchTicketsList(): Promise<TicketWithCustomer[]> {
+  const { data, error } = await supabase
+    .from('tickets')
+    .select('*, customers(id, name, company, plan, status, customer_identifiers(type, value, is_primary))')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as unknown as TicketWithCustomer[]
+}
+
+export function TicketsClient({ tickets: initialTickets }: { tickets: TicketWithCustomer[] }) {
+  const queryClient = useQueryClient()
+  const { data: tickets = initialTickets } = useQuery({
+    queryKey: TICKETS_LIST_QUERY_KEY,
+    queryFn: fetchTicketsList,
+    initialData: initialTickets,
+    initialDataUpdatedAt: Date.now(),
+  })
   const [search,         setSearch]         = useState('')
   const [statusFilter,   setStatusFilter]   = useState('all')
   const [priorityFilter, setPriorityFilter] = useState('all')
@@ -223,7 +240,7 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
       if (error) throw error
       toast.success('Ticket criado!')
       setTicketSuggestions((prev) => prev.filter((x) => x.customer_id !== s.customer_id))
-      router.refresh()
+      queryClient.invalidateQueries({ queryKey: TICKETS_LIST_QUERY_KEY })
     } catch {
       toast.error('Erro ao criar ticket.')
     } finally {
@@ -245,7 +262,7 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
       })
       if (error) throw error
       toast.success('Ticket criado!')
-      router.refresh()
+      queryClient.invalidateQueries({ queryKey: TICKETS_LIST_QUERY_KEY })
     } catch {
       toast.error('Erro ao criar ticket.')
     } finally {
@@ -259,13 +276,13 @@ export function TicketsClient({ tickets }: { tickets: TicketWithCustomer[] }) {
       if (ticket) { setResolutionTicket({ ticket, newStatus: status }); return }
     }
     await supabase.from('tickets').update({ status }).eq('id', id)
-    router.refresh()
+    queryClient.invalidateQueries({ queryKey: TICKETS_LIST_QUERY_KEY })
   }
 
   async function commitStatusUpdate(id: string, status: string) {
     await supabase.from('tickets').update({ status }).eq('id', id)
     setResolutionTicket(null)
-    router.refresh()
+    queryClient.invalidateQueries({ queryKey: TICKETS_LIST_QUERY_KEY })
   }
 
   async function sendToDevTeam(t: TicketWithCustomer) {

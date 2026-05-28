@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import dynamic from 'next/dynamic'
 import { Building2, Plus, Search, Globe, Users, MailSearch, Loader2, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -27,8 +28,26 @@ interface CompanyRow {
   customers: { id: string }[]
 }
 
-export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
+export const COMPANIES_LIST_QUERY_KEY = ['companies', 'list'] as const
+
+async function fetchCompaniesList(): Promise<CompanyRow[]> {
+  const { data, error } = await supabase
+    .from('companies')
+    .select('*, customers(id)')
+    .order('name')
+  if (error) throw error
+  return (data ?? []) as unknown as CompanyRow[]
+}
+
+export function CompaniesClient({ companies: initialCompanies }: { companies: CompanyRow[] }) {
   const router = useRouter()
+  const queryClient = useQueryClient()
+  const { data: companies = initialCompanies } = useQuery({
+    queryKey: COMPANIES_LIST_QUERY_KEY,
+    queryFn: fetchCompaniesList,
+    initialData: initialCompanies,
+    initialDataUpdatedAt: Date.now(),
+  })
   const [search, setSearch] = useState('')
   const [showEmpty, setShowEmpty] = useState(false)
   const [showNew, setShowNew] = useState(false)
@@ -50,7 +69,7 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
       if (error) throw error
       toast.success(`${c.name} eliminada.`)
       setDeleteTarget(null)
-      router.refresh()
+      queryClient.invalidateQueries({ queryKey: COMPANIES_LIST_QUERY_KEY })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao eliminar empresa.')
     } finally {
@@ -67,7 +86,7 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
       try { json = JSON.parse(text) } catch { throw new Error('Servidor sem resposta.') }
       if (!json.ok) throw new Error(json.error ?? 'Erro desconhecido')
       toast.success(`${json.removed} removidas · ${json.renamed} renomeadas · ${json.kept} mantidas`)
-      router.refresh()
+      queryClient.invalidateQueries({ queryKey: COMPANIES_LIST_QUERY_KEY })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao organizar empresas.')
     } finally {
@@ -82,7 +101,7 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
       const json = await res.json()
       if (!json.ok) throw new Error(json.error ?? 'Erro desconhecido')
       toast.success(json.message)
-      router.refresh()
+      queryClient.invalidateQueries({ queryKey: COMPANIES_LIST_QUERY_KEY })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao importar contactos.')
     } finally {
@@ -251,7 +270,7 @@ export function CompaniesClient({ companies }: { companies: CompanyRow[] }) {
         </div>
       )}
 
-      <NewCompanyDialog open={showNew} onClose={() => { setShowNew(false); router.refresh() }} />
+      <NewCompanyDialog open={showNew} onClose={() => { setShowNew(false); queryClient.invalidateQueries({ queryKey: COMPANIES_LIST_QUERY_KEY }) }} />
 
       <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && !deleting && setDeleteTarget(null)}>
         <DialogContent className="max-w-sm">

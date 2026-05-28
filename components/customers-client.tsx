@@ -2,12 +2,14 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import dynamic from 'next/dynamic'
 import { Plus, Search, Heart, ArrowUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn, STATUS_STYLES, STATUS_LABELS, healthColor } from '@/lib/utils'
+import { supabase } from '@/lib/supabase'
 import type { CustomerWithIdentifiers } from '@/lib/database.types'
 
 const NewCustomerDialog = dynamic(
@@ -17,7 +19,25 @@ const NewCustomerDialog = dynamic(
 
 const ALL_STATUSES = ['onboarding', 'active', 'at-risk', 'troubleshooting', 'churned']
 
-export function CustomersClient({ customers }: { customers: CustomerWithIdentifiers[] }) {
+export const CUSTOMERS_LIST_QUERY_KEY = ['customers', 'list'] as const
+
+async function fetchCustomersList(): Promise<CustomerWithIdentifiers[]> {
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*, customer_identifiers(*)')
+    .order('name')
+  if (error) throw error
+  return (data ?? []) as unknown as CustomerWithIdentifiers[]
+}
+
+export function CustomersClient({ customers: initialCustomers }: { customers: CustomerWithIdentifiers[] }) {
+  const queryClient = useQueryClient()
+  const { data: customers = initialCustomers } = useQuery({
+    queryKey: CUSTOMERS_LIST_QUERY_KEY,
+    queryFn: fetchCustomersList,
+    initialData: initialCustomers,
+    initialDataUpdatedAt: Date.now(),
+  })
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [healthFilter, setHealthFilter] = useState<'all' | 'low' | 'mid' | 'high'>('all')
@@ -224,7 +244,7 @@ export function CustomersClient({ customers }: { customers: CustomerWithIdentifi
         </table>
       </div>
 
-      <NewCustomerDialog open={showNew} onClose={() => { setShowNew(false); router.refresh() }} />
+      <NewCustomerDialog open={showNew} onClose={() => { setShowNew(false); queryClient.invalidateQueries({ queryKey: CUSTOMERS_LIST_QUERY_KEY }) }} />
     </div>
   )
 }

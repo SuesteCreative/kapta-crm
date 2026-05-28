@@ -16,12 +16,15 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
 
   if (!customerRes.data) notFound()
 
-  // Primary: interactions directly linked to this customer
+  // Primary: interactions directly linked to this customer. Cap at 200 — the
+  // detail page is the single biggest payload on the site (full email bodies
+  // are returned), and Pedro rarely scrolls past the recent few weeks.
   const { data: primaryInteractions } = await supabase
     .from('interactions')
     .select('*')
     .eq('customer_id', id)
     .order('occurred_at', { ascending: false })
+    .limit(200)
 
   // Secondary: interactions from OTHER customers matched by any of this customer's email identifiers
   // Catches emails synced before the identifier was registered (or auto-created duplicates not yet re-linked)
@@ -41,6 +44,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
       .select('*')
       .or(orClauses)
       .neq('customer_id', id)
+      .order('occurred_at', { ascending: false })
+      .limit(100)
     secondaryInteractions = data ?? []
   }
 

@@ -23,7 +23,10 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
 
   const [{ data: interactions }, { data: followUps }, { data: tickets }, { data: integrations }] = await Promise.all([
     customerIds.length
-      ? supabase.from('interactions').select('*').in('customer_id', customerIds).order('occurred_at', { ascending: false })
+      // Cap at 200 — company detail aggregates interactions across every
+      // customer in the company, so the unbounded version was the heaviest
+      // query on the site by far.
+      ? supabase.from('interactions').select('*').in('customer_id', customerIds).order('occurred_at', { ascending: false }).limit(200)
       : Promise.resolve({ data: [] }),
     customerIds.length
       ? supabase.from('follow_ups').select('*').in('customer_id', customerIds).eq('status', 'open').order('due_date', { ascending: true })
