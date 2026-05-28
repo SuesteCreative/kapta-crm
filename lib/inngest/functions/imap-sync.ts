@@ -1,109 +1,119 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase'
+import { runImapSync } from '@/lib/imap/sync-core'
 
-const SYNC_TIMEOUT_MS = 4 * 60 * 1000
-
-// Resolves the deployed URL so the Inngest function (running on its own
-// invocation) can call the existing /api/imap/sync route. Falls back to
-// localhost in dev.
-function getBaseUrl(): string {
-  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
-  return 'http://localhost:3000'
-}
+// Number of emails to fully process per Inngest invocation. Kept low so each
+// invocation finishes under Vercel Hobby's 60s function limit; the function
+// chains itself via continuation events until the backlog is cleared.
+const CHUNK_SIZE = 25
 
 /**
  * Manual + cron-triggered IMAP sync.
- * The Inngest layer gives us:
- *  - non-blocking UX (sidebar dispatches an event, returns immediately)
- *  - retries on transient failures (the underlying sync is dedup-safe)
- *  - a job_status row the UI subscribes to for completion toasts
+ *
+ * Each invocation processes up to CHUNK_SIZE candidate emails. If more
+ * candidates remain (hasMore=true), the function dispatches another
+ * `imap/sync.requested` event with trigger='continue' and the same jobId,
+ * so the job_status row tracks the whole chain to completion.
  */
 export const imapSync = inngest.createFunction(
   {
     id: 'imap-sync',
     name: 'IMAP sync',
     triggers: [{ event: 'imap/sync.requested' }],
-    // Concurrency 1 — never run two syncs in parallel (would race on inserts).
     concurrency: { limit: 1 },
-    // Dedupe rapid-fire dispatches (e.g. sidebar double-click): collapse
-    // events with the same trigger into one within a 60s window.
-    debounce: { period: '60s', key: 'event.data.trigger' },
+    // Debounce only manual triggers — continuation events must always fire.
+    debounce: { period: '60s', key: 'event.data.trigger === "manual" ? "manual" : event.id' },
   },
   async ({ event, step, logger }) => {
-    const trigger = event.data.trigger
+    const trigger = event.data.trigger as 'cron' | 'manual' | 'continue'
+    const incomingJobId = event.data.jobId as string | undefined
     const supabase = createServiceClient()
 
-    const jobRow = await step.run('create-job-row', async () => {
+    // Reuse an existing job_status row across the continuation chain so the
+    // user sees one "Sync email" task, not one per chunk.
+    const jobId = await step.run('ensure-job-row', async () => {
+      if (incomingJobId) return incomingJobId
       const { data, error } = await supabase
         .from('job_status')
-        .insert({ kind: 'imap_sync', status: 'running', metadata: { trigger } })
+        .insert({ kind: 'imap_sync', status: 'running', metadata: { trigger, chunks: 0, synced: 0, created: 0, skipped: 0 } })
         .select('id')
         .single()
       if (error) throw new Error(`job_status insert failed: ${error.message}`)
-      return data
+      return data.id as string
     })
 
-    try {
-      const result = await step.run('call-imap-sync', async () => {
-        const url = `${getBaseUrl()}/api/imap/sync`
-        const bypass = process.env.VERCEL_PROTECTION_BYPASS
-        const headers: Record<string, string> = {
-          Authorization: `Bearer ${process.env.CRON_SECRET ?? ''}`,
-        }
-        // Vercel Deployment Protection (Vercel Authentication) blocks server-
-        // to-server fetches without this header. The Bypass for Automation
-        // token is configured in the Vercel project settings.
-        if (bypass) {
-          headers['x-vercel-protection-bypass'] = bypass
-          headers['x-vercel-set-bypass-cookie'] = 'samesitenone'
-        }
-        const res = await fetch(url, {
-          method: 'GET',
-          headers,
-          signal: AbortSignal.timeout(SYNC_TIMEOUT_MS),
-        })
-        const text = await res.text()
-        let json: Record<string, unknown> = {}
-        try { json = JSON.parse(text) } catch { /* keep empty */ }
-        if (!res.ok || json.ok === false) {
-          throw new Error((json.error as string) ?? `sync route HTTP ${res.status}: ${text.slice(0, 300)}`)
-        }
-        return json
-      })
+    const result = await step.run('sync-chunk', () => runImapSync({ maxEmails: CHUNK_SIZE }))
 
-      await step.run('mark-done', async () => {
-        const synced = (result.synced as number) ?? 0
-        const created = (result.created_leads as number) ?? 0
-        const skipped = (result.skipped_duplicate as number) ?? 0
-        const msg = synced > 0
-          ? `${synced} email${synced === 1 ? '' : 's'} importados${created > 0 ? `, ${created} lead${created === 1 ? '' : 's'} novo${created === 1 ? '' : 's'}` : ''}`
-          : 'Sem novos emails'
+    if (!result.ok) {
+      await step.run('mark-failed', async () => {
         await supabase
           .from('job_status')
           .update({
-            status: 'done',
-            message: msg,
-            metadata: { trigger, synced, created, skipped },
+            status: 'failed',
+            message: result.error.slice(0, 500),
             completed_at: new Date().toISOString(),
           })
-          .eq('id', jobRow.id)
+          .eq('id', jobId)
       })
+      throw new Error(result.error)
+    }
 
-      return { jobId: jobRow.id, ...result }
-    } catch (err) {
-      logger.error('imap-sync failed', { err })
-      const msg = err instanceof Error ? err.message : String(err)
+    // Accumulate counts in job_status.metadata so the final toast can show
+    // the total across all chunks.
+    const totals = await step.run('accumulate-counts', async () => {
+      const { data: existing } = await supabase
+        .from('job_status')
+        .select('metadata')
+        .eq('id', jobId)
+        .maybeSingle()
+      const prev = (existing?.metadata as Record<string, number> | null) ?? {}
+      const next = {
+        ...prev,
+        trigger,
+        chunks:  (prev.chunks  ?? 0) + 1,
+        synced:  (prev.synced  ?? 0) + result.synced,
+        created: (prev.created ?? 0) + result.created_leads,
+        skipped: (prev.skipped ?? 0) + result.skipped_duplicate,
+      }
+      return next
+    })
+
+    if (result.hasMore) {
+      await step.run('persist-running', async () => {
+        await supabase
+          .from('job_status')
+          .update({
+            status: 'running',
+            message: `${totals.synced} importados (continuando…)`,
+            metadata: totals,
+          })
+          .eq('id', jobId)
+      })
+      await step.sendEvent('continue-sync', {
+        name: 'imap/sync.requested',
+        data: { trigger: 'continue', jobId },
+      })
+      logger.info('imap-sync chunk done, continuing', { chunks: totals.chunks, syncedSoFar: totals.synced })
+      return { jobId, hasMore: true, totals }
+    }
+
+    await step.run('mark-done', async () => {
+      const synced = totals.synced as number
+      const created = totals.created as number
+      const msg = synced > 0
+        ? `${synced} email${synced === 1 ? '' : 's'} importados${created > 0 ? `, ${created} lead${created === 1 ? '' : 's'} novo${created === 1 ? '' : 's'}` : ''}`
+        : 'Sem novos emails'
       await supabase
         .from('job_status')
         .update({
-          status: 'failed',
-          message: msg.slice(0, 500),
-          metadata: { trigger, error: msg },
+          status: 'done',
+          message: msg,
+          metadata: totals,
           completed_at: new Date().toISOString(),
         })
-        .eq('id', jobRow.id)
-      throw err
-    }
+        .eq('id', jobId)
+    })
+
+    return { jobId, hasMore: false, totals }
   },
 )
