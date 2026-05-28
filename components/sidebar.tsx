@@ -29,16 +29,24 @@ export function Sidebar() {
   const [pasteOpen, setPasteOpen] = useState(false)
   const [fhPending, setFhPending] = useState<number>(0)
 
-  // Pending FH count badge — refetch on path change so converting a row updates the badge.
+  // Pending FH count badge — fetch on mount + every 60s.
+  // Previously refetched on every navigation, which hit a heavy endpoint
+  // (pulls 1.5k interactions + external FH API) on every link click.
   useEffect(() => {
     if (pathname === '/login') return
     let cancelled = false
-    fetch('/api/fareharbor/pending-count')
-      .then((r) => r.ok ? r.json() : { count: 0 })
-      .then((d) => { if (!cancelled) setFhPending(d.count ?? 0) })
-      .catch(() => { /* silent */ })
-    return () => { cancelled = true }
-  }, [pathname])
+    const load = () => {
+      fetch('/api/fareharbor/pending-count')
+        .then((r) => r.ok ? r.json() : { count: 0 })
+        .then((d) => { if (!cancelled) setFhPending(d.count ?? 0) })
+        .catch(() => { /* silent */ })
+    }
+    load()
+    const t = setInterval(load, 60_000)
+    return () => { cancelled = true; clearInterval(t) }
+  // Mount-only — pathname dep removed deliberately.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Global keyboard shortcut: Cmd/Ctrl + Shift + V
   useEffect(() => {
@@ -52,17 +60,23 @@ export function Sidebar() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Auto-sync on app open and on navigation — but at most once every 10 minutes.
-  // The localStorage timestamp guard makes the extra route-change runs a no-op.
+  // Auto-sync on app open + every 10 minutes while the tab stays open.
+  // Previously fired on every pathname change: if the 10-min debounce had
+  // elapsed, a navigation would trigger a 30-60s blocking IMAP sync followed
+  // by router.refresh(), which felt like the app froze on every link click.
   useEffect(() => {
     if (pathname === '/login') return
     const INTERVAL_MS = 10 * 60 * 1000
-    const lastSync = Number(localStorage.getItem('lastEmailSync') ?? 0)
-    if (Date.now() - lastSync > INTERVAL_MS) {
-      syncEmail(true)
+    const maybeSync = () => {
+      const lastSync = Number(localStorage.getItem('lastEmailSync') ?? 0)
+      if (Date.now() - lastSync > INTERVAL_MS) syncEmail(true)
     }
+    maybeSync()
+    const t = setInterval(maybeSync, INTERVAL_MS)
+    return () => clearInterval(t)
+  // Mount-only — pathname dep removed deliberately.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname])
+  }, [])
 
   if (pathname === '/login') return null
 

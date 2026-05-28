@@ -22,7 +22,7 @@ export default async function EmailsPage() {
     .select(fullSelect)
     .eq('type', 'email')
     .order('occurred_at', { ascending: false })
-    .limit(500)
+    .limit(200)
 
   // Fallback: is_read column missing (migration not applied) — fetch without it
   // and treat all rows as read so the list still renders.
@@ -32,7 +32,7 @@ export default async function EmailsPage() {
       .select(fallbackSelect)
       .eq('type', 'email')
       .order('occurred_at', { ascending: false })
-      .limit(500)
+      .limit(200)
     rows = (fb.data ?? []).map((r) => ({ ...r, is_read: true })) as typeof rows
   }
 
