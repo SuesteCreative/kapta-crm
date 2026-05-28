@@ -47,9 +47,20 @@ export const imapSync = inngest.createFunction(
     try {
       const result = await step.run('call-imap-sync', async () => {
         const url = `${getBaseUrl()}/api/imap/sync`
+        const bypass = process.env.VERCEL_PROTECTION_BYPASS
+        const headers: Record<string, string> = {
+          Authorization: `Bearer ${process.env.CRON_SECRET ?? ''}`,
+        }
+        // Vercel Deployment Protection (Vercel Authentication) blocks server-
+        // to-server fetches without this header. The Bypass for Automation
+        // token is configured in the Vercel project settings.
+        if (bypass) {
+          headers['x-vercel-protection-bypass'] = bypass
+          headers['x-vercel-set-bypass-cookie'] = 'samesitenone'
+        }
         const res = await fetch(url, {
           method: 'GET',
-          headers: { Authorization: `Bearer ${process.env.CRON_SECRET ?? ''}` },
+          headers,
           signal: AbortSignal.timeout(SYNC_TIMEOUT_MS),
         })
         const text = await res.text()
