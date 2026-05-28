@@ -93,6 +93,24 @@ export function RecipientPicker({ label, value, onChange, placeholder = 'email@e
     onChange([...value, r])
   }
 
+  function addMany(raw: string): number {
+    const tokens = raw.split(/[,;\n\r\t\s]+/).map((s) => s.trim()).filter(Boolean)
+    if (tokens.length === 0) return 0
+    const existing = new Set(value.map((v) => v.email.toLowerCase()))
+    const next: Recipient[] = []
+    let added = 0
+    for (const t of tokens) {
+      if (!EMAIL_RE.test(t)) continue
+      const k = t.toLowerCase()
+      if (existing.has(k)) continue
+      existing.add(k)
+      next.push({ email: t })
+      added++
+    }
+    if (added > 0) onChange([...value, ...next])
+    return added
+  }
+
   function addCustomer(c: CustomerSearchResult) {
     const additions: Recipient[] = c.emails.length > 0
       ? c.emails.map((email) => ({ email, customer_id: c.id, name: c.name, company: c.company }))
@@ -114,7 +132,17 @@ export function RecipientPicker({ label, value, onChange, placeholder = 'email@e
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if ([',', ';', 'Enter', 'Tab'].includes(e.key)) {
       const raw = (e.currentTarget as HTMLInputElement).value.trim()
-      // Try to add as free-typed email when it looks like one
+      // Multi-email string (commas / semicolons / spaces) → bulk add
+      if (raw && /[,;\s]/.test(raw)) {
+        const added = addMany(raw)
+        if (added > 0) {
+          e.preventDefault()
+          ;(e.currentTarget as HTMLInputElement).value = ''
+          setQuery('')
+          return
+        }
+      }
+      // Single free-typed email
       if (raw && EMAIL_RE.test(raw)) {
         e.preventDefault()
         addRecipient({ email: raw })
@@ -122,7 +150,7 @@ export function RecipientPicker({ label, value, onChange, placeholder = 'email@e
         setQuery('')
         return
       }
-      // If the input is plain text (likely a customer search), Enter picks the first result
+      // Plain text + Enter → pick first customer result
       if (e.key === 'Enter' && results.length > 0) {
         e.preventDefault()
         addCustomer(results[0])
@@ -130,9 +158,29 @@ export function RecipientPicker({ label, value, onChange, placeholder = 'email@e
     }
   }
 
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData('text')
+    if (!text || !/[,;\s]/.test(text)) return // single token → default behaviour
+    e.preventDefault()
+    const added = addMany(text)
+    if (added > 0) {
+      ;(e.currentTarget as HTMLInputElement).value = ''
+      setQuery('')
+    }
+  }
+
   function handleBlur(e: React.FocusEvent<HTMLInputElement>) {
     const raw = e.currentTarget.value.trim()
-    if (raw && EMAIL_RE.test(raw)) {
+    if (!raw) return
+    if (/[,;\s]/.test(raw)) {
+      const added = addMany(raw)
+      if (added > 0) {
+        e.currentTarget.value = ''
+        setQuery('')
+        return
+      }
+    }
+    if (EMAIL_RE.test(raw)) {
       addRecipient({ email: raw })
       e.currentTarget.value = ''
       setQuery('')
@@ -174,6 +222,7 @@ export function RecipientPicker({ label, value, onChange, placeholder = 'email@e
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             onBlur={handleBlur}
             onFocus={() => { if (results.length > 0) setResultsOpen(true) }}
           />
