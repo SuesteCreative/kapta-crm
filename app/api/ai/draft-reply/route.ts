@@ -117,12 +117,9 @@ async function handle(req: Request) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     console.error('buildCustomerContext failed:', msg)
-    // Don't fail the whole request — drafting can proceed without customer context
     customerContext = null
   }
 
-  // When user gave a specific instruction, trim thread to last 5 emails (instruction is canonical,
-  // long thread dilutes attention). Without instruction, keep 30 emails for context recovery.
   const hasInstruction = !!user_instruction?.trim()
   const threadLimit = hasInstruction ? 5 : 30
   const emailThread = interactions
@@ -143,14 +140,12 @@ ${text}`
     })
     .join('\n\n---\n\n')
 
-  // Last subject for Re: prefix
   const lastSubject = interactions.find((i) => i.subject)?.subject ?? ''
 
   const basePrompt =
     language === 'en' ? SYSTEM_PROMPT_EN :
     language === 'es' ? SYSTEM_PROMPT_ES :
     SYSTEM_PROMPT_PT
-  // Sign-off is appended by the send route as an HTML signature — do not include it in the body
   const signoffInstruction = `Do NOT include a sign-off or closing at the end of the body. End the email after the last sentence of content. The signature will be added automatically.`
 
   let memory: string | null = null
@@ -178,9 +173,6 @@ ${text}`
     })
   }
 
-  // Put INSTRUCTION block at the TOP of the user message so Sonnet anchors on it,
-  // not on the thread. Wrap in explicit markers so the system prompt's INSTRUCTION-FIRST
-  // rule fires reliably.
   const userMessage = hasInstruction
     ? [
         `<INSTRUCTION>`,
@@ -204,40 +196,42 @@ ${text}`
         `Use "Re: ${lastSubject}" as subject (or adjust slightly if needed).`,
       ].join('\n')
 
-  let message
-  try {
-    message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
-      system: systemBlocks,
-      messages: [{ role: 'user', content: userMessage }],
-    })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error('Claude API error:', msg)
-    return NextResponse.json({ ok: false, error: `Claude error: ${msg}` }, { status: 500 })
-  }
+  // Stream the raw model output (JSON-shaped) directly to the client as
+  // plain text deltas. The client extracts the body field progressively via
+  // a tolerant regex so the textarea fills in as Sonnet generates, instead
+  // of waiting 5-10s for a single JSON blob at the end.
+  const stream = await client.messages.stream({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 2048,
+    system: systemBlocks,
+    messages: [{ role: 'user', content: userMessage }],
+  })
 
-  // Find first text block — model may return thinking/other blocks before text
-  const textBlock = message.content?.find((b) => b.type === 'text')
-  const rawText = textBlock?.type === 'text' ? textBlock.text : ''
-  if (!rawText) {
-    console.error('Claude empty/non-text response. stop_reason=', message.stop_reason, 'content=', JSON.stringify(message.content).slice(0, 300))
-    return NextResponse.json({
-      ok: false,
-      error: `Claude empty response (stop_reason=${message.stop_reason ?? 'unknown'})`,
-    }, { status: 500 })
-  }
-  const match = rawText.match(/\{[\s\S]*\}/)
-  if (!match) {
-    console.error('Claude non-JSON response:', rawText.slice(0, 200))
-    return NextResponse.json({ ok: false, error: `Claude returned unexpected format: ${rawText.slice(0, 120)}` }, { status: 500 })
-  }
+  const encoder = new TextEncoder()
+  const readable = new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const event of stream) {
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            controller.enqueue(encoder.encode(event.delta.text))
+          }
+        }
+        controller.close()
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('draft-reply stream error:', msg)
+        controller.error(err)
+      }
+    },
+  })
 
-  try {
-    const result = JSON.parse(match[0])
-    return NextResponse.json({ ok: true, ...result })
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Claude returned invalid JSON' }, { status: 500 })
-  }
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+      // Prevent buffering on intermediaries — chunks must reach the browser
+      // as they're produced for the progressive-textarea UX to work.
+      'X-Accel-Buffering': 'no',
+    },
+  })
 }
