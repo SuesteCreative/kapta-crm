@@ -73,6 +73,46 @@ import { supabase } from '@/lib/supabase'
 import { stripHtml } from '@/lib/html-utils'
 import { toast } from 'sonner'
 import Link from 'next/link'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+
+// Per-customer interactions query. Mirrors the merge done server-side in
+// app/customers/[id]/page.tsx: primary rows directly linked, plus secondary
+// rows matched by metadata.matched_email against this customer's email
+// identifiers (catches emails synced before the identifier was registered).
+async function fetchCustomerInteractions(
+  customerId: string,
+  emailValues: string[],
+): Promise<Interaction[]> {
+  const primaryRes = await supabase
+    .from('interactions')
+    .select('*')
+    .eq('customer_id', customerId)
+    .order('occurred_at', { ascending: false })
+    .limit(200)
+  if (primaryRes.error) throw primaryRes.error
+  const primary = (primaryRes.data ?? []) as unknown as Interaction[]
+
+  let secondary: Interaction[] = []
+  if (emailValues.length > 0) {
+    const orClauses = emailValues
+      .map((e) => `metadata->>matched_email.eq.${e.replace(/,/g, '')}`)
+      .join(',')
+    const secRes = await supabase
+      .from('interactions')
+      .select('*')
+      .or(orClauses)
+      .neq('customer_id', customerId)
+      .order('occurred_at', { ascending: false })
+      .limit(100)
+    if (secRes.error) throw secRes.error
+    secondary = (secRes.data ?? []) as unknown as Interaction[]
+  }
+
+  const seen = new Set<string>()
+  return [...primary, ...secondary]
+    .filter((i) => { if (seen.has(i.id)) return false; seen.add(i.id); return true })
+    .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
+}
 
 interface Props {
   customer: CustomerWithIdentifiers
@@ -229,8 +269,19 @@ function groupTimeline(interactions: Interaction[]): ThreadItem[] {
 }
 
 
-export function CustomerDetailClient({ customer, interactions, followUps, tickets }: Props) {
+export function CustomerDetailClient({ customer, interactions: initialInteractions, followUps, tickets }: Props) {
   const router = useRouter()
+  const queryClient = useQueryClient()
+  const emailValues = customer.customer_identifiers
+    .filter((i) => i.type === 'email')
+    .map((i) => i.value)
+  const interactionsKey = ['customer', customer.id, 'interactions'] as const
+  const { data: interactions = initialInteractions } = useQuery({
+    queryKey: interactionsKey,
+    queryFn: () => fetchCustomerInteractions(customer.id, emailValues),
+    initialData: initialInteractions,
+    initialDataUpdatedAt: Date.now(),
+  })
   const [showAddInteraction,    setShowAddInteraction]    = useState(false)
   const [showAddFollowUp,       setShowAddFollowUp]       = useState(false)
   const [showTicketBuilder,     setShowTicketBuilder]     = useState(false)
@@ -396,7 +447,14 @@ export function CustomerDetailClient({ customer, interactions, followUps, ticket
   const doneFollowUps = followUps.filter((f) => f.status === 'done')
   const openTickets   = tickets.filter((t) => t.status === 'open' || t.status === 'in-progress')
   const statusStyle   = STATUS_STYLES[customer.status]
-  const refresh       = () => router.refresh()
+  // Invalidates the interactions cache and forces a server re-render so
+  // follow_ups / tickets (still SSR-fed) update too. Many places in this
+  // component call refresh() after mutations — wiring both keeps the cache
+  // consistent without changing the dozens of call sites.
+  const refresh       = () => {
+    queryClient.invalidateQueries({ queryKey: interactionsKey })
+    router.refresh()
+  }
 
   type AISummary = { situation: string; urgency: 'critical' | 'high' | 'normal' | 'good'; next_action: string }
   const [aiSummary,        setAiSummary]        = useState<AISummary | null>(null)

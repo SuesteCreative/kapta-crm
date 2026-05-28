@@ -119,9 +119,12 @@ export function JobToaster() {
         // Invalidate any client-cached query that depends on the emails
         // table so the UI picks up the new rows without a full page
         // reload, and fall back to router.refresh() for server components
-        // still on the old data-fetch path.
+        // still on the old data-fetch path. Customer-detail keeps its
+        // interactions list per-customer; queryKey 'customer' wildcards
+        // hit every mounted detail page in the tab.
         queryClient.invalidateQueries({ queryKey: ['emails', 'list'] })
         queryClient.invalidateQueries({ queryKey: ['follow-ups', 'inbound'] })
+        queryClient.invalidateQueries({ queryKey: ['customer'] })
         router.refresh()
       } else if (row.kind === 'ai_triage') {
         // Triage wrote ai_triage metadata onto inbound interactions; the
