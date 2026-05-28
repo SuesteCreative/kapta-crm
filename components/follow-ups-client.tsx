@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Circle, AlertTriangle, Clock, CalendarDays, Sparkles, Loader2, X, ShieldAlert, Mail, Search } from 'lucide-react'
 import { cn, dueDateLabel, PRIORITY_STYLES } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
@@ -115,15 +116,50 @@ function primaryEmail(c: CustomerInInteraction | null): string | null {
   return primary?.value ?? any?.value ?? null
 }
 
+export const FOLLOW_UPS_LIST_QUERY_KEY = ['follow-ups', 'list'] as const
+export const FOLLOW_UPS_INBOUND_QUERY_KEY = ['follow-ups', 'inbound'] as const
+
+async function fetchFollowUps(): Promise<FollowUpWithCustomer[]> {
+  const { data, error } = await supabase
+    .from('follow_ups')
+    .select('*, customers(id, name, company)')
+    .order('due_date', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as unknown as FollowUpWithCustomer[]
+}
+
+async function fetchInboundInteractions(): Promise<EmailInteraction[]> {
+  const { data, error } = await supabase
+    .from('interactions')
+    .select('id, customer_id, direction, subject, occurred_at, metadata, customers(id, name, company, company_id, customer_identifiers(value, type, is_primary))')
+    .eq('type', 'email')
+    .order('occurred_at', { ascending: false })
+    .limit(200)
+  if (error) throw error
+  return (data ?? []) as unknown as EmailInteraction[]
+}
+
 export function FollowUpsClient({
-  followUps,
-  emailInteractions = [],
+  followUps: initialFollowUps,
+  emailInteractions: initialEmailInteractions = [],
 }: {
   followUps: FollowUpWithCustomer[]
   emailInteractions?: EmailInteraction[]
 }) {
-  const router = useRouter()
+  const queryClient = useQueryClient()
   const params = useSearchParams()
+  const { data: followUps = initialFollowUps } = useQuery({
+    queryKey: FOLLOW_UPS_LIST_QUERY_KEY,
+    queryFn: fetchFollowUps,
+    initialData: initialFollowUps,
+    initialDataUpdatedAt: Date.now(),
+  })
+  const { data: emailInteractions = initialEmailInteractions } = useQuery({
+    queryKey: FOLLOW_UPS_INBOUND_QUERY_KEY,
+    queryFn: fetchInboundInteractions,
+    initialData: initialEmailInteractions,
+    initialDataUpdatedAt: Date.now(),
+  })
   const [tab, setTab] = useState(params.get('filter') ?? 'reply')
   const [triaging, setTriaging] = useState(false)
   // Pre-populate triage from metadata already stored in DB — no button click needed
@@ -291,7 +327,7 @@ export function FollowUpsClient({
       if (error) throw error
       toast.success('Follow-up criado!')
       setCommitmentSuggestions((prev) => prev.filter((x) => x.customer_id !== s.customer_id))
-      router.refresh()
+      queryClient.invalidateQueries({ queryKey: FOLLOW_UPS_LIST_QUERY_KEY })
     } catch {
       toast.error('Erro ao criar follow-up.')
     } finally {
@@ -331,7 +367,7 @@ export function FollowUpsClient({
       if (error) throw error
       toast.success('Follow-up criado!')
       setFollowUpSuggestions((prev) => prev.filter((x) => x.customer_id !== s.customer_id))
-      router.refresh()
+      queryClient.invalidateQueries({ queryKey: FOLLOW_UPS_LIST_QUERY_KEY })
     } catch {
       toast.error('Erro ao criar follow-up.')
     } finally {
@@ -347,7 +383,7 @@ export function FollowUpsClient({
     }).eq('id', id)
     if (error) { toast.error('Erro.'); return }
     toast.success(next === 'done' ? 'Concluído!' : 'Reaberto.')
-    router.refresh()
+    queryClient.invalidateQueries({ queryKey: FOLLOW_UPS_LIST_QUERY_KEY })
   }
 
   const tabs = [

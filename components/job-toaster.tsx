@@ -121,6 +121,7 @@ export function JobToaster() {
         // reload, and fall back to router.refresh() for server components
         // still on the old data-fetch path.
         queryClient.invalidateQueries({ queryKey: ['emails', 'list'] })
+        queryClient.invalidateQueries({ queryKey: ['follow-ups', 'inbound'] })
         router.refresh()
       }
     }
