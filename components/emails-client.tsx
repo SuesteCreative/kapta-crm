@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Mail, MailOpen, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
   ExternalLink, Paperclip, Reply, ReplyAll, Forward, PenSquare, FileText, Trash2,
-  Ticket as TicketIcon, CalendarCheck, AlertTriangle, ChevronRight, Plug, Wrench,
+  Ticket as TicketIcon, CalendarCheck, AlertTriangle, ChevronRight, Plug, Wrench, Code2,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
@@ -16,6 +16,7 @@ import { SendEmailDialog, type EmailContact } from '@/components/send-email-dial
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
 import { EmailActionPanel } from '@/components/email-action-panel'
 import { ComposeEmailDialog, type ComposeInitialState } from '@/components/compose-email-dialog'
+import { HtmlBulkEmailDialog } from '@/components/html-bulk-email-dialog'
 import { TicketBuilderDialog } from '@/components/ticket-builder-dialog'
 import { FollowUpDialog } from '@/components/follow-up-dialog'
 import { FhIntegrationDialog } from '@/components/fh-integration-dialog'
@@ -193,6 +194,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   const [replyCtx, setReplyCtx]         = useState<ReplyContext | null>(null)
   const [replyLoading, setReplyLoading] = useState(false)
   const [composeOpen, setComposeOpen]   = useState(false)
+  const [htmlBulkOpen, setHtmlBulkOpen] = useState(false)
   const [composeDraftId, setComposeDraftId] = useState<string | null>(null)
   const [composeInitial, setComposeInitial] = useState<ComposeInitialState | null>(null)
   const [selectedContent, setSelectedContent] = useState<string | null>(null)
@@ -554,6 +556,20 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
           >
             <PenSquare className="h-3.5 w-3.5" />
             Novo email
+          </button>
+
+          <button
+            onClick={() => setHtmlBulkOpen(true)}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-opacity hover:opacity-70"
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              color: 'var(--foreground)',
+            }}
+            title="Envio bulk HTML com BCC GDPR-safe"
+          >
+            <Code2 className="h-3.5 w-3.5" />
+            Bulk HTML
           </button>
 
           {drafts.length > 0 && (
@@ -1194,6 +1210,11 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
         draftId={composeDraftId}
         initialState={composeInitial}
         onClose={() => { setComposeOpen(false); setComposeDraftId(null); setComposeInitial(null) }}
+      />
+
+      <HtmlBulkEmailDialog
+        open={htmlBulkOpen}
+        onClose={() => setHtmlBulkOpen(false)}
       />
 
       {ticketCtx && (
