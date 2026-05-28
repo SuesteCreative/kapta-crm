@@ -3,6 +3,7 @@ import { Outfit } from 'next/font/google'
 import './globals.css'
 import { Toaster } from '@/components/ui/sonner'
 import { Sidebar } from '@/components/sidebar'
+import { Providers } from '@/components/providers'
 
 const outfit = Outfit({
   subsets: ['latin'],
@@ -20,13 +21,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt" className={`h-full ${outfit.variable}`}>
       <body className="h-full">
-        <div className="flex h-full">
-          <Sidebar />
-          <main className="flex-1 overflow-auto bg-background">
-            {children}
-          </main>
-        </div>
-        <Toaster richColors position="top-right" closeButton duration={6000} />
+        <Providers>
+          <div className="flex h-full">
+            <Sidebar />
+            <main className="flex-1 overflow-auto bg-background">
+              {children}
+            </main>
+          </div>
+          <Toaster richColors position="top-right" closeButton duration={6000} />
+        </Providers>
       </body>
     </html>
   )
