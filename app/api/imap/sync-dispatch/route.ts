@@ -26,3 +26,21 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true, dispatched: true })
 }
+
+/**
+ * GET handler exists for Vercel cron — the platform always sends GET. This
+ * lets us redirect the daily cron at /api/imap/sync (which historically ran
+ * the whole sync inline under the 60s budget) to the chunked Inngest path,
+ * so a growing backlog never trips the cron either.
+ */
+export async function GET(req: NextRequest) {
+  const denied = requireAuth(req)
+  if (denied) return denied
+
+  await inngest.send({
+    name: 'imap/sync.requested',
+    data: { trigger: 'cron' },
+  })
+
+  return NextResponse.json({ ok: true, dispatched: true, trigger: 'cron' })
+}

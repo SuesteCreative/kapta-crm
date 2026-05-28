@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/imap/sync",
+      "path": "/api/imap/sync-dispatch",
       "schedule": "0 7 * * *"
     }
   ],
