@@ -7,17 +7,19 @@ import {
   OctagonX,
   TriangleAlert,
 } from "lucide-react"
-import { useTheme } from "next-themes"
 import { Toaster as Sonner } from "sonner"
 
 type ToasterProps = React.ComponentProps<typeof Sonner>
 
+// Previously called useTheme() from next-themes, but no ThemeProvider is
+// mounted anywhere in this app — so the hook returned undefined on the
+// server and 'system' on the client, which caused the React #418
+// hydration mismatch we saw in production. The app is light-theme only,
+// so we hard-code the value.
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
-
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme="light"
       className="toaster group"
       icons={{
         success: <CircleCheck className="h-4 w-4" />,
