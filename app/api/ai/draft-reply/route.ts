@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 import { buildCustomerContext } from '@/lib/customer-context'
 import { stripHtml } from '@/lib/html-utils'
+import { streamAnthropicResponse } from '@/lib/ai/streaming'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -197,9 +198,8 @@ ${text}`
       ].join('\n')
 
   // Stream the raw model output (JSON-shaped) directly to the client as
-  // plain text deltas. The client extracts the body field progressively via
-  // a tolerant regex so the textarea fills in as Sonnet generates, instead
-  // of waiting 5-10s for a single JSON blob at the end.
+  // plain text deltas. The client extracts the body field progressively
+  // via a tolerant regex so the textarea fills in as Sonnet generates.
   const stream = await client.messages.stream({
     model: 'claude-sonnet-4-6',
     max_tokens: 2048,
@@ -207,31 +207,5 @@ ${text}`
     messages: [{ role: 'user', content: userMessage }],
   })
 
-  const encoder = new TextEncoder()
-  const readable = new ReadableStream({
-    async start(controller) {
-      try {
-        for await (const event of stream) {
-          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-            controller.enqueue(encoder.encode(event.delta.text))
-          }
-        }
-        controller.close()
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error('draft-reply stream error:', msg)
-        controller.error(err)
-      }
-    },
-  })
-
-  return new Response(readable, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-store',
-      // Prevent buffering on intermediaries — chunks must reach the browser
-      // as they're produced for the progressive-textarea UX to work.
-      'X-Accel-Buffering': 'no',
-    },
-  })
+  return streamAnthropicResponse(stream)
 }

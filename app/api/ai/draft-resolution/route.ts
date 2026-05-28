@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
+import { streamAnthropicResponse } from '@/lib/ai/streaming'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -49,9 +50,8 @@ export async function POST(req: Request) {
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-  let message
   try {
-    message = await client.messages.create({
+    const stream = await client.messages.stream({
       model: 'claude-sonnet-4-6',
       max_tokens: 512,
       system: [{ type: 'text', text: `${SYSTEM_PROMPT}${memorySystemBlock(memory)}`, cache_control: { type: 'ephemeral' } }],
@@ -60,23 +60,10 @@ export async function POST(req: Request) {
         content: `Cliente: ${customer_name}${customer_company ? ` (${customer_company})` : ''}\n\nTicket resolvido:\n${ticketSummary}\n\nEscreve o email de resolução.`,
       }],
     })
+    return streamAnthropicResponse(stream)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('Claude API error:', msg)
     return NextResponse.json({ ok: false, error: `Claude error: ${msg}` }, { status: 500 })
-  }
-
-  const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
-  const match = rawText.match(/\{[\s\S]*\}/)
-  if (!match) {
-    console.error('Claude non-JSON response:', rawText.slice(0, 200))
-    return NextResponse.json({ ok: false, error: 'Claude returned unexpected format' }, { status: 500 })
-  }
-
-  try {
-    const result = JSON.parse(match[0])
-    return NextResponse.json({ ok: true, ...result })
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Erro ao processar.' }, { status: 500 })
   }
 }

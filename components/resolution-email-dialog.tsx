@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Sparkles, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { readTextStream, extractJsonFields } from '@/lib/ai/streaming'
 
 interface TicketData {
   title: string
@@ -58,10 +59,19 @@ export function ResolutionEmailDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ customer_name: customerName, customer_company: customerCompany, ticket }),
       })
-      const json = await res.json()
-      if (!json.ok) throw new Error(json.error)
-      if (json.subject) setSubject(json.subject)
-      if (json.body) setBody(json.body)
+      const raw = await readTextStream(res, (cumulative) => {
+        const fields = extractJsonFields(cumulative)
+        if (fields.subject !== null) setSubject(fields.subject)
+        if (fields.body !== null) setBody(fields.body)
+      })
+      const jsonMatch = raw.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        try {
+          const final = JSON.parse(jsonMatch[0]) as { subject?: string; body?: string }
+          if (final.subject) setSubject(final.subject)
+          if (final.body) setBody(final.body)
+        } catch { /* progressive value already applied */ }
+      }
     } catch {
       toast.error('Erro ao gerar rascunho — preenche manualmente.')
     } finally {

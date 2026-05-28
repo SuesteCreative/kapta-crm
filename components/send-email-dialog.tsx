@@ -11,6 +11,7 @@ import { Sparkles, Loader2, ChevronDown, ChevronUp, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import type { Template, Interaction } from '@/lib/database.types'
+import { readTextStream, extractJsonFields } from '@/lib/ai/streaming'
 
 export interface EmailContact {
   label: string
@@ -218,39 +219,11 @@ export function SendEmailDialog({
           })),
         }),
       })
-      // Server streams plain text now. Errors come back as JSON (the route's
-      // pre-streaming validation path) and look like `{"ok":false,"error":...}`.
-      if (!res.ok || !res.body) {
-        const fallback = await res.text().catch(() => '')
-        let errorMsg = fallback
-        try { errorMsg = (JSON.parse(fallback) as { error?: string }).error ?? fallback } catch { /* keep text */ }
-        throw new Error(errorMsg || `HTTP ${res.status}`)
-      }
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let raw = ''
-      let lastBody = ''
-      let lastSubject = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        raw += decoder.decode(value, { stream: true })
-
-        // The model is asked to output { "subject": "...", "body": "..." }.
-        // Extract each field progressively so the textarea fills as text
-        // streams in — tolerant of incomplete JSON near the tail.
-        const subjMatch = raw.match(/"subject"\s*:\s*"((?:[^"\\]|\\.)*)/)
-        if (subjMatch && subjMatch[1] !== lastSubject) {
-          lastSubject = subjMatch[1]
-          setSubject(unescapeJsonString(subjMatch[1]))
-        }
-        const bodyMatch = raw.match(/"body"\s*:\s*"((?:[^"\\]|\\.)*)/)
-        if (bodyMatch && bodyMatch[1] !== lastBody) {
-          lastBody = bodyMatch[1]
-          setBody(unescapeJsonString(bodyMatch[1]))
-        }
-      }
+      const raw = await readTextStream(res, (cumulative) => {
+        const fields = extractJsonFields(cumulative)
+        if (fields.subject !== null) setSubject(fields.subject)
+        if (fields.body !== null) setBody(fields.body)
+      })
 
       // Final parse to apply the fully-decoded values (escapes etc).
       const jsonMatch = raw.match(/\{[\s\S]*\}/)
@@ -269,19 +242,6 @@ export function SendEmailDialog({
     }
   }
 
-  // Decode JSON-escape sequences in a partial string (the tail may be mid-
-  // escape, but JSON.parse can't run on incomplete input). Covers the
-  // common cases the model emits: \n, \t, \", \\, \uXXXX.
-  function unescapeJsonString(s: string): string {
-    return s
-      .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-      .replace(/\\n/g, '\n')
-      .replace(/\\t/g, '\t')
-      .replace(/\\r/g, '\r')
-      .replace(/\\"/g, '"')
-      .replace(/\\\\/g, '\\')
-  }
-
   async function handleRefine() {
     if (!body.trim() || !refineInput.trim()) return
     setRefining(true)
@@ -291,14 +251,24 @@ export function SendEmailDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentDraft: body, instruction: refineInput, language }),
       })
-      const text = await res.text()
-      let json: { ok: boolean; body?: string; error?: string }
-      try { json = JSON.parse(text) } catch {
-        const snippet = text.slice(0, 160).replace(/\s+/g, ' ').trim()
-        throw new Error(`HTTP ${res.status} sem JSON: ${snippet || '(vazio)'}`)
-      }
-      if (!json.ok) throw new Error(json.error ?? 'Erro')
-      if (json.body) { setBody(json.body); toast.success('Rascunho ajustado!') }
+      const final = await readTextStream(res, (cumulative) => {
+        // Stream cleanup: strip the same preambles the old server-side
+        // post-processor did — model usually obeys but be defensive.
+        const cleaned = cumulative
+          .replace(/^(here is|aqui está|aqui tem)[^\n]*\n+/i, '')
+          .replace(/^```(?:[a-z]+)?\n/, '')
+          .replace(/\n```$/, '')
+          .trim()
+        setBody(cleaned)
+      })
+      // Re-apply cleanup on the final string (in case the closing fence
+      // arrived in the last chunk after the regex above already ran).
+      const cleanedFinal = final
+        .replace(/^(here is|aqui está|aqui tem)[^\n]*\n+/i, '')
+        .replace(/^```(?:[a-z]+)?\n([\s\S]*?)\n```$/m, '$1')
+        .trim()
+      setBody(cleanedFinal)
+      toast.success('Rascunho ajustado!')
       setRefineInput('')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao ajustar rascunho.')

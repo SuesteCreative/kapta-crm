@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireAuth } from '@/lib/api-auth'
+import { streamAnthropicResponse } from '@/lib/ai/streaming'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -75,23 +76,14 @@ ${instruction.trim()}
 Apply the instruction to the draft above. Return only the revised email body.`
 
   try {
-    const message = await client.messages.create({
+    const stream = await client.messages.stream({
       model: 'claude-sonnet-4-6',
       max_tokens: 1500,
       temperature: 0.3,
       system: [{ type: 'text', text: basePrompt, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: userMessage }],
     })
-
-    let refined = message.content[0].type === 'text' ? message.content[0].text.trim() : currentDraft
-
-    // Strip common AI preambles defensively
-    refined = refined
-      .replace(/^(here is|aqui está|aqui tem)[^\n]*\n+/i, '')
-      .replace(/^```(?:[a-z]+)?\n([\s\S]*?)\n```$/m, '$1')
-      .trim()
-
-    return NextResponse.json({ ok: true, body: refined })
+    return streamAnthropicResponse(stream)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('refine-draft error:', msg)

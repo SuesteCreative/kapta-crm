@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { RecipientPicker, type Recipient } from '@/components/recipient-picker'
 import { uploadAttachment, type UploadedAttachment, MAX_ATTACHMENT_BYTES } from '@/lib/upload-attachment'
+import { readTextStream, extractJsonFields } from '@/lib/ai/streaming'
 
 interface PromptPreset {
   id: string
@@ -251,10 +252,19 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
           })),
         }),
       })
-      const json = await res.json()
-      if (!json.ok) throw new Error(json.error ?? 'Erro')
-      if (json.subject) setSubject(json.subject)
-      if (json.body) setBody(json.body)
+      const raw = await readTextStream(res, (cumulative) => {
+        const fields = extractJsonFields(cumulative)
+        if (fields.subject !== null) setSubject(fields.subject)
+        if (fields.body !== null) setBody(fields.body)
+      })
+      const jsonMatch = raw.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        try {
+          const final = JSON.parse(jsonMatch[0]) as { subject?: string; body?: string }
+          if (final.subject) setSubject(final.subject)
+          if (final.body) setBody(final.body)
+        } catch { /* progressive value already applied */ }
+      }
       toast.success('Rascunho gerado — revê antes de enviar.')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao gerar rascunho.')
@@ -272,9 +282,20 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentDraft: body, instruction: refineInput, language }),
       })
-      const json = await res.json()
-      if (!json.ok) throw new Error(json.error ?? 'Erro')
-      if (json.body) { setBody(json.body); toast.success('Rascunho ajustado!') }
+      const final = await readTextStream(res, (cumulative) => {
+        const cleaned = cumulative
+          .replace(/^(here is|aqui está|aqui tem)[^\n]*\n+/i, '')
+          .replace(/^```(?:[a-z]+)?\n/, '')
+          .replace(/\n```$/, '')
+          .trim()
+        setBody(cleaned)
+      })
+      const cleanedFinal = final
+        .replace(/^(here is|aqui está|aqui tem)[^\n]*\n+/i, '')
+        .replace(/^```(?:[a-z]+)?\n([\s\S]*?)\n```$/m, '$1')
+        .trim()
+      setBody(cleanedFinal)
+      toast.success('Rascunho ajustado!')
       setRefineInput('')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao ajustar.')

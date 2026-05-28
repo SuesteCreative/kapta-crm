@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
 import { buildCustomerContext } from '@/lib/customer-context'
 import { requireAuth } from '@/lib/api-auth'
+import { streamAnthropicResponse } from '@/lib/ai/streaming'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -140,9 +141,8 @@ export async function POST(req: Request) {
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-  let message
   try {
-    message = await client.messages.create({
+    const stream = await client.messages.stream({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: [{
@@ -152,27 +152,10 @@ export async function POST(req: Request) {
       }],
       messages: [{ role: 'user', content: userMessage }],
     })
+    return streamAnthropicResponse(stream)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('Claude API error:', msg)
     return NextResponse.json({ ok: false, error: `Claude error: ${msg}` }, { status: 500 })
-  }
-
-  const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
-  const match = rawText.match(/\{[\s\S]*\}/)
-  if (!match) {
-    console.error('Claude non-JSON response:', rawText.slice(0, 200))
-    return NextResponse.json({ ok: false, error: 'Claude returned unexpected format' }, { status: 500 })
-  }
-
-  try {
-    const result = JSON.parse(match[0]) as { subject?: string; body?: string }
-    return NextResponse.json({
-      ok: true,
-      subject: result.subject ?? '',
-      body: result.body ?? '',
-    })
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Claude returned invalid JSON' }, { status: 500 })
   }
 }
