@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { useQueryClient } from '@tanstack/react-query'
 
 type JobRow = {
   id: string
@@ -21,6 +22,7 @@ type JobRow = {
 // every update so the bar animates smoothly across the multi-chunk chain.
 export function JobToaster() {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const activeToastIds = useRef<Set<string>>(new Set())
 
   useEffect(() => {
@@ -113,7 +115,14 @@ export function JobToaster() {
         ),
         { duration: 6000 },
       )
-      if (row.kind === 'imap_sync') router.refresh()
+      if (row.kind === 'imap_sync') {
+        // Invalidate any client-cached query that depends on the emails
+        // table so the UI picks up the new rows without a full page
+        // reload, and fall back to router.refresh() for server components
+        // still on the old data-fetch path.
+        queryClient.invalidateQueries({ queryKey: ['emails', 'list'] })
+        router.refresh()
+      }
     }
 
     function showFailed(row: JobRow) {
@@ -170,7 +179,7 @@ export function JobToaster() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [router])
+  }, [router, queryClient])
 
   return null
 }

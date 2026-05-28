@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Mail, MailOpen, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
   ExternalLink, Paperclip, Reply, ReplyAll, Forward, PenSquare, FileText, Trash2,
@@ -195,8 +196,37 @@ function formatBytes(n?: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
-export function EmailsClient({ emails }: { emails: EmailRow[] }) {
+// Fetches the same shape the server-side page fetches, so the useQuery
+// initialData hand-off is a no-op on first paint.
+async function fetchEmailsList(): Promise<EmailRow[]> {
+  const fullSelect = `
+    id, customer_id, direction, subject, occurred_at, metadata, is_read,
+    customers ( id, name, company, customer_identifiers ( type, value ) )
+  `
+  const { data, error } = await supabase
+    .from('interactions')
+    .select(fullSelect)
+    .eq('type', 'email')
+    .order('occurred_at', { ascending: false })
+    .limit(200)
+  if (error) throw error
+  return (data ?? []) as unknown as EmailRow[]
+}
+
+export const EMAILS_LIST_QUERY_KEY = ['emails', 'list'] as const
+
+export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) {
   const router = useRouter()
+  const queryClient = useQueryClient()
+  const { data: emails = initialEmails } = useQuery({
+    queryKey: EMAILS_LIST_QUERY_KEY,
+    queryFn: fetchEmailsList,
+    initialData: initialEmails,
+    // initialData was server-rendered in this render — keep it fresh for the
+    // current SSR window, then let staleTime (30s, from Providers) drive
+    // background refetches.
+    initialDataUpdatedAt: Date.now(),
+  })
   const [search, setSearch]             = useState('')
   const [filter, setFilter]             = useState<InboxFilter>('all')
   const [syncing, setSyncing]           = useState(false)
@@ -314,7 +344,7 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
       const json = await res.json()
       if (!json.ok) throw new Error(json.error ?? 'Erro')
       toast.success(action === 'flag' ? 'Marcado como pedido FH' : 'Pedido FH desmarcado')
-      router.refresh()
+      queryClient.invalidateQueries({ queryKey: EMAILS_LIST_QUERY_KEY })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao atualizar.')
     } finally {
@@ -488,25 +518,26 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
   }
 
   async function syncNow(silent = false) {
+    // Fire-and-forget via Inngest dispatch — same path as the sidebar button.
+    // The <JobToaster /> handles the progress bar + completion toast, and
+    // we invalidate the emails query when the sync completes (handled in
+    // <JobToaster /> on the status='done' event via router.refresh()).
     setSyncing(true)
     try {
-      const res  = await fetch('/api/imap/sync')
-      const text = await res.text()
-      let data: Record<string, unknown>
-      try { data = JSON.parse(text) } catch { throw new Error(`Resposta inválida (HTTP ${res.status}): ${text.slice(0, 200)}`) }
+      const res = await fetch('/api/imap/sync-dispatch', { method: 'POST' })
+      const data = await res.json().catch(() => ({} as Record<string, unknown>))
+      if (!res.ok || !data.ok) {
+        throw new Error((data.error as string) ?? `HTTP ${res.status}`)
+      }
       localStorage.setItem('lastEmailSync', String(Date.now()))
-      if (data.ok) {
-        if ((data.synced as number) > 0) {
-          if (!silent) toast.success(`${data.synced} email(s) importados · ${data.created_leads ?? 0} novos leads`, { duration: Infinity })
-          router.refresh()
-        } else {
-          if (!silent) toast.success('Sem novos emails', { duration: Infinity })
-        }
-      } else {
-        if (!silent) toast.error('Erro ao sincronizar', { description: data.error as string, duration: Infinity })
+      if (!silent) {
+        toast.info('A sincronizar email…', {
+          description: 'Vais ver uma barra de progresso quando começar.',
+          duration: 4000,
+        })
       }
     } catch (e) {
-      if (!silent) toast.error('Erro ao sincronizar', { description: String(e), duration: Infinity })
+      if (!silent) toast.error('Não consegui iniciar o sync', { description: String(e), duration: Infinity })
     } finally {
       setSyncing(false)
     }
