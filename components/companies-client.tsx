@@ -2,11 +2,16 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { Building2, Plus, Search, Globe, Users, MailSearch, Loader2, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { NewCompanyDialog } from '@/components/new-company-dialog'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+
+const NewCompanyDialog = dynamic(
+  () => import('@/components/new-company-dialog').then((m) => ({ default: m.NewCompanyDialog })),
+  { ssr: false },
+)
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 

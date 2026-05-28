@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import {
   Mail, MessageSquare, Video,
   Plus, ExternalLink, Heart, Building2, Tag,
@@ -22,18 +23,52 @@ import {
   PLATFORM_LABELS, INPUT_PLATFORM_LABELS, OUTPUT_PLATFORM_LABELS,
   type CustomerWithIdentifiers, type Interaction, type FollowUp, type Ticket,
 } from '@/lib/database.types'
-import { AddInteractionDialog } from '@/components/add-interaction-dialog'
-import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
-import { TicketBuilderDialog } from '@/components/ticket-builder-dialog'
-import { EditCustomerDialog } from '@/components/edit-customer-dialog'
-import { MergeCustomerDialog } from '@/components/merge-customer-dialog'
-import { BubblesVideoModal } from '@/components/bubbles-video-modal'
-import { PasteConversationDialog } from '@/components/paste-conversation-dialog'
-import { SendEmailDialog } from '@/components/send-email-dialog'
-import { OnboardingDialog } from '@/components/onboarding-dialog'
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
-import { ResolutionEmailDialog } from '@/components/resolution-email-dialog'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
+
+// Dialogs lazy-loaded — only fetched when the user opens them.
+// Customer detail used to ship all dialog JS up-front; with the page being
+// 1.4k lines this dwarfs the actual detail-view code.
+const AddInteractionDialog = dynamic(
+  () => import('@/components/add-interaction-dialog').then((m) => ({ default: m.AddInteractionDialog })),
+  { ssr: false },
+)
+const AddFollowUpDialog = dynamic(
+  () => import('@/components/add-follow-up-dialog').then((m) => ({ default: m.AddFollowUpDialog })),
+  { ssr: false },
+)
+const TicketBuilderDialog = dynamic(
+  () => import('@/components/ticket-builder-dialog').then((m) => ({ default: m.TicketBuilderDialog })),
+  { ssr: false },
+)
+const EditCustomerDialog = dynamic(
+  () => import('@/components/edit-customer-dialog').then((m) => ({ default: m.EditCustomerDialog })),
+  { ssr: false },
+)
+const MergeCustomerDialog = dynamic(
+  () => import('@/components/merge-customer-dialog').then((m) => ({ default: m.MergeCustomerDialog })),
+  { ssr: false },
+)
+const BubblesVideoModal = dynamic(
+  () => import('@/components/bubbles-video-modal').then((m) => ({ default: m.BubblesVideoModal })),
+  { ssr: false },
+)
+const PasteConversationDialog = dynamic(
+  () => import('@/components/paste-conversation-dialog').then((m) => ({ default: m.PasteConversationDialog })),
+  { ssr: false },
+)
+const SendEmailDialog = dynamic(
+  () => import('@/components/send-email-dialog').then((m) => ({ default: m.SendEmailDialog })),
+  { ssr: false },
+)
+const OnboardingDialog = dynamic(
+  () => import('@/components/onboarding-dialog').then((m) => ({ default: m.OnboardingDialog })),
+  { ssr: false },
+)
+const ResolutionEmailDialog = dynamic(
+  () => import('@/components/resolution-email-dialog').then((m) => ({ default: m.ResolutionEmailDialog })),
+  { ssr: false },
+)
 import { supabase } from '@/lib/supabase'
 import { stripHtml } from '@/lib/html-utils'
 import { toast } from 'sonner'

@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { CheckCircle2, Circle, AlertTriangle, Clock, CalendarDays, Sparkles, Loader2, X, ShieldAlert, Mail, Search } from 'lucide-react'
 import { cn, dueDateLabel, PRIORITY_STYLES } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
@@ -10,7 +11,10 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { FollowUp, Interaction } from '@/lib/database.types'
-import { SendEmailDialog } from '@/components/send-email-dialog'
+const SendEmailDialog = dynamic(
+  () => import('@/components/send-email-dialog').then((m) => ({ default: m.SendEmailDialog })),
+  { ssr: false },
+)
 
 type FollowUpWithCustomer = FollowUp & { customers: { id: string; name: string; company: string | null } | null }
 

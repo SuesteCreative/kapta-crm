@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { Copy, Check, Sparkles, Loader2, Users, Mail, MessageCircle, X, ChevronDown, ChevronUp, Search, CheckCircle2 } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
@@ -10,8 +11,15 @@ import { Input } from '@/components/ui/input'
 import { PRIORITY_STYLES, formatDate } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
-import { BulkEmailDialog } from '@/components/bulk-email-dialog'
-import { ResolutionEmailDialog } from '@/components/resolution-email-dialog'
+// Dialogs lazy-loaded — only fetched when opened.
+const BulkEmailDialog = dynamic(
+  () => import('@/components/bulk-email-dialog').then((m) => ({ default: m.BulkEmailDialog })),
+  { ssr: false },
+)
+const ResolutionEmailDialog = dynamic(
+  () => import('@/components/resolution-email-dialog').then((m) => ({ default: m.ResolutionEmailDialog })),
+  { ssr: false },
+)
 import { PLATFORM_LABELS, INPUT_PLATFORM_LABELS, OUTPUT_PLATFORM_LABELS, type Ticket } from '@/lib/database.types'
 
 type CustomerIdentifier = { type: string; value: string; is_primary: boolean }

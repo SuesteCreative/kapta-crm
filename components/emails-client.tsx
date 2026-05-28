@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import {
   Mail, MailOpen, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
   ExternalLink, Paperclip, Reply, ReplyAll, Forward, PenSquare, FileText, Trash2,
@@ -12,15 +13,38 @@ import { formatDateTime } from '@/lib/utils'
 import { stripHtml } from '@/lib/html-utils'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
-import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
 import { EmailHtmlViewer } from '@/components/email-html-viewer'
 import { EmailActionPanel } from '@/components/email-action-panel'
-import { ComposeEmailDialog, type ComposeInitialState } from '@/components/compose-email-dialog'
-import { HtmlBulkEmailDialog } from '@/components/html-bulk-email-dialog'
-import { TicketBuilderDialog } from '@/components/ticket-builder-dialog'
-import { FollowUpDialog } from '@/components/follow-up-dialog'
-import { FhIntegrationDialog } from '@/components/fh-integration-dialog'
+import type { EmailContact } from '@/components/send-email-dialog'
+import type { ComposeInitialState } from '@/components/compose-email-dialog'
 import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
+
+// Dialogs lazy-loaded — only fetched when the user opens them.
+// Cuts initial JS bundle for /emails by ~tens of KB.
+const SendEmailDialog = dynamic(
+  () => import('@/components/send-email-dialog').then((m) => ({ default: m.SendEmailDialog })),
+  { ssr: false },
+)
+const ComposeEmailDialog = dynamic(
+  () => import('@/components/compose-email-dialog').then((m) => ({ default: m.ComposeEmailDialog })),
+  { ssr: false },
+)
+const HtmlBulkEmailDialog = dynamic(
+  () => import('@/components/html-bulk-email-dialog').then((m) => ({ default: m.HtmlBulkEmailDialog })),
+  { ssr: false },
+)
+const TicketBuilderDialog = dynamic(
+  () => import('@/components/ticket-builder-dialog').then((m) => ({ default: m.TicketBuilderDialog })),
+  { ssr: false },
+)
+const FollowUpDialog = dynamic(
+  () => import('@/components/follow-up-dialog').then((m) => ({ default: m.FollowUpDialog })),
+  { ssr: false },
+)
+const FhIntegrationDialog = dynamic(
+  () => import('@/components/fh-integration-dialog').then((m) => ({ default: m.FhIntegrationDialog })),
+  { ssr: false },
+)
 import type { Recipient } from '@/components/recipient-picker'
 import type { Interaction, CustomerIdentifier, CustomerWithIdentifiers } from '@/lib/database.types'
 import { getPlatform, PLATFORM_STYLES } from '@/lib/platform-detector'
@@ -511,7 +535,11 @@ export function EmailsClient({ emails }: { emails: EmailRow[] }) {
       !search ||
       (e.subject ?? '').toLowerCase().includes(q) ||
       (e.customers?.name ?? '').toLowerCase().includes(q) ||
-      (e.customers?.company ?? '').toLowerCase().includes(q)
+      (e.customers?.company ?? '').toLowerCase().includes(q) ||
+      (e.customers?.customer_identifiers ?? []).some((i) =>
+        i.value.toLowerCase().includes(q),
+      ) ||
+      (e.metadata?.matched_email as string | undefined ?? '').toLowerCase().includes(q)
     if (!matchesSearch) return false
     if (filter === 'all')         return true
     if (filter === 'inbound')     return e.direction === 'inbound'

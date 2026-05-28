@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import {
   Building2, Globe, ArrowLeft, Pencil,
   Mail,
@@ -15,11 +16,25 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { EditCompanyDialog } from '@/components/edit-company-dialog'
-import { AddInteractionDialog } from '@/components/add-interaction-dialog'
-import { AddFollowUpDialog } from '@/components/add-follow-up-dialog'
-import { SendEmailDialog } from '@/components/send-email-dialog'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+
+// Dialogs lazy-loaded — only fetched when opened.
+const EditCompanyDialog = dynamic(
+  () => import('@/components/edit-company-dialog').then((m) => ({ default: m.EditCompanyDialog })),
+  { ssr: false },
+)
+const AddInteractionDialog = dynamic(
+  () => import('@/components/add-interaction-dialog').then((m) => ({ default: m.AddInteractionDialog })),
+  { ssr: false },
+)
+const AddFollowUpDialog = dynamic(
+  () => import('@/components/add-follow-up-dialog').then((m) => ({ default: m.AddFollowUpDialog })),
+  { ssr: false },
+)
+const SendEmailDialog = dynamic(
+  () => import('@/components/send-email-dialog').then((m) => ({ default: m.SendEmailDialog })),
+  { ssr: false },
+)
 import { cn, STATUS_STYLES, STATUS_LABELS, healthColor, URGENCY_STYLES, formatDateTime, formatDate, dueDateLabel, PRIORITY_STYLES } from '@/lib/utils'
 import { CHANNEL_CONFIG } from '@/lib/channel-config'
 import { supabase } from '@/lib/supabase'

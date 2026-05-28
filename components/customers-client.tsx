@@ -2,13 +2,18 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { Plus, Search, Heart, ArrowUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn, STATUS_STYLES, STATUS_LABELS, healthColor } from '@/lib/utils'
 import type { CustomerWithIdentifiers } from '@/lib/database.types'
-import { NewCustomerDialog } from '@/components/new-customer-dialog'
+
+const NewCustomerDialog = dynamic(
+  () => import('@/components/new-customer-dialog').then((m) => ({ default: m.NewCustomerDialog })),
+  { ssr: false },
+)
 
 const ALL_STATUSES = ['onboarding', 'active', 'at-risk', 'troubleshooting', 'churned']
 
