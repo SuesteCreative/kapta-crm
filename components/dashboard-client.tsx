@@ -13,40 +13,22 @@ import { CommitmentsWidget } from '@/components/commitments-widget'
 
 type FollowUpWithCustomer = FollowUp & { customers: { name: string; company: string | null } | null }
 
-type EmailAction = {
-  customerId: string
-  customerName: string
-  company: string | null
-  subject: string | null
-  daysWaiting: number
-  aiPriority: string | null
-  aiAction: string | null
-  aiSummary: string | null
-  aiCategory: string | null
-}
-
 interface DashboardData {
   overdue: FollowUpWithCustomer[]
   today: FollowUpWithCustomer[]
   customers: Pick<Customer, 'id' | 'status'>[]
   openTickets: number
-  emailActions: EmailAction[]
-  totalNeedsReply: number
+  // Approximation of "things to reply to": count of unread inbound emails.
+  // The actual list streams in separately via the emailsSlot.
+  unreadInboundCount: number
 }
 
 const KPI_CONFIG = [
   { key: 'overdue',  label: 'Atrasados',       icon: AlertTriangle, color: '#E5484D', bg: 'rgba(229,72,77,0.10)',   borderColor: '#E5484D', href: '/follow-ups?filter=overdue' },
   { key: 'today',    label: 'Para hoje',         icon: Clock,         color: '#F59E0B', bg: 'rgba(245,158,11,0.10)',  borderColor: '#F59E0B', href: '/follow-ups?filter=today'   },
-  { key: 'reply',    label: 'Emails por responder', icon: Mail,       color: '#3B82F6', bg: 'rgba(59,130,246,0.10)', borderColor: '#3B82F6', href: '/follow-ups'                },
+  { key: 'reply',    label: 'Emails por ler', icon: Mail,       color: '#3B82F6', bg: 'rgba(59,130,246,0.10)', borderColor: '#3B82F6', href: '/emails?filter=unread'      },
   { key: 'tickets',  label: 'Tickets abertos',   icon: Ticket,        color: '#5B5BD6', bg: 'rgba(91,91,214,0.10)',  borderColor: '#5B5BD6', href: '/tickets'                   },
 ]
-
-const PRIORITY_COLORS: Record<string, { dot: string; badge: string; text: string }> = {
-  urgent: { dot: '#EF4444', badge: 'rgba(239,68,68,0.12)',  text: '#EF4444' },
-  high:   { dot: '#F59E0B', badge: 'rgba(245,158,11,0.12)', text: '#B45309' },
-  medium: { dot: '#3B82F6', badge: 'rgba(59,130,246,0.12)', text: '#2563EB' },
-  low:    { dot: '#9CA3AF', badge: 'rgba(156,163,175,0.12)',text: '#6B7280' },
-}
 
 const PRIORITY_BORDER: Record<string, string> = {
   urgent: '#E5484D', high: '#F97316', medium: '#3B82F6', low: '#A0AEC0',
@@ -68,8 +50,8 @@ type DigestResult = {
   note: string
 }
 
-export function DashboardClient({ data }: { data: DashboardData }) {
-  const { overdue, today, customers, openTickets, emailActions, totalNeedsReply } = data
+export function DashboardClient({ data, emailsSlot }: { data: DashboardData; emailsSlot: React.ReactNode }) {
+  const { overdue, today, customers, openTickets, unreadInboundCount } = data
   const [digest, setDigest] = useState<DigestResult | null>(null)
   const [generatingDigest, setGeneratingDigest] = useState(false)
 
@@ -92,7 +74,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
   const kpiValues: Record<string, number> = {
     overdue: overdue.length,
     today: today.length,
-    reply: totalNeedsReply,
+    reply: unreadInboundCount,
     tickets: openTickets,
   }
 
@@ -118,8 +100,8 @@ export function DashboardClient({ data }: { data: DashboardData }) {
           </h1>
           <p style={{ fontSize: '0.875rem', color: 'var(--muted-foreground)', margin: '0.35rem 0 0' }}>
             {overdue.length > 0
-              ? `Tens ${overdue.length} follow-up${overdue.length > 1 ? 's' : ''} atrasado${overdue.length > 1 ? 's' : ''} e ${totalNeedsReply} emails por responder.`
-              : `${totalNeedsReply} emails por responder hoje.`}
+              ? `Tens ${overdue.length} follow-up${overdue.length > 1 ? 's' : ''} atrasado${overdue.length > 1 ? 's' : ''} e ${unreadInboundCount} email${unreadInboundCount === 1 ? '' : 's'} por ler.`
+              : `${unreadInboundCount} email${unreadInboundCount === 1 ? '' : 's'} por ler.`}
           </p>
         </div>
         <button
@@ -317,96 +299,8 @@ export function DashboardClient({ data }: { data: DashboardData }) {
           )}
         </div>
 
-        {/* Right: Emails a responder */}
-        <div style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)', borderRadius: 14, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)' }}>
-            <div>
-              <p style={sectionLabel}>Emails</p>
-              <p style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--foreground)', margin: '0.15rem 0 0', letterSpacing: '-0.01em' }}>
-                O que responder
-              </p>
-            </div>
-            <Link href="/follow-ups" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.8125rem', fontWeight: 600, color: 'var(--primary)', textDecoration: 'none', opacity: 0.9 }}>
-              Ver todos <ArrowUpRight style={{ width: 13, height: 13 }} />
-            </Link>
-          </div>
-
-          {emailActions.length === 0 ? (
-            <div style={{ padding: '3rem 1.25rem', textAlign: 'center', color: 'var(--muted-foreground)', fontSize: '0.875rem' }}>
-              <Mail style={{ width: 28, height: 28, margin: '0 auto 0.75rem', opacity: 0.3 }} />
-              Sem emails por responder.
-            </div>
-          ) : (
-            <div>
-              {emailActions.map((e, idx) => {
-                const prio = e.aiPriority ? PRIORITY_COLORS[e.aiPriority] : null
-                return (
-                  <Link key={e.customerId} href={`/customers/${e.customerId}`}
-                    style={{
-                      display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
-                      padding: '0.875rem 1.25rem',
-                      borderBottom: idx < emailActions.length - 1 ? '1px solid var(--border)' : 'none',
-                      textDecoration: 'none', transition: 'background 120ms', background: 'transparent',
-                    }}
-                    className="row-hover"
-                  >
-                    {/* Priority dot */}
-                    <div style={{ marginTop: 5, width: 8, height: 8, borderRadius: '50%', background: prio?.dot ?? 'var(--muted-foreground)', flexShrink: 0 }} />
-
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      {/* Name + company */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                        <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--foreground)', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {e.customerName}
-                        </p>
-                        {e.company && (
-                          <span style={{ fontSize: '0.7125rem', color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>· {e.company}</span>
-                        )}
-                      </div>
-
-                      {/* AI action — this is the "what to do" */}
-                      {e.aiAction ? (
-                        <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', margin: '0.2rem 0 0', display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <Sparkles style={{ width: 10, height: 10, color: 'var(--primary)', flexShrink: 0 }} />
-                          {e.aiAction}
-                        </p>
-                      ) : e.subject ? (
-                        <p style={{ fontSize: '0.75rem', color: 'var(--muted-foreground)', margin: '0.2rem 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {e.subject}
-                        </p>
-                      ) : null}
-
-                      {/* AI summary (secondary) */}
-                      {e.aiSummary && (
-                        <p style={{ fontSize: '0.6875rem', color: 'var(--muted-foreground)', margin: '0.15rem 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {e.aiSummary}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Days waiting + priority badge */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem', flexShrink: 0 }}>
-                      {prio && (
-                        <span style={{ fontSize: '0.625rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', borderRadius: 999, padding: '0.15rem 0.45rem', background: prio.badge, color: prio.text }}>
-                          {e.aiPriority}
-                        </span>
-                      )}
-                      <span style={{ fontSize: '0.6875rem', color: e.daysWaiting >= 7 ? '#EF4444' : e.daysWaiting >= 3 ? '#F59E0B' : 'var(--muted-foreground)', fontWeight: 500 }}>
-                        {e.daysWaiting === 0 ? 'hoje' : `${e.daysWaiting}d`}
-                      </span>
-                    </div>
-                  </Link>
-                )
-              })}
-
-              {totalNeedsReply > 10 && (
-                <Link href="/follow-ups" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0.75rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--primary)', textDecoration: 'none', borderTop: '1px solid var(--border)' }}>
-                  + {totalNeedsReply - 10} mais <ArrowUpRight style={{ width: 12, height: 12 }} />
-                </Link>
-              )}
-            </div>
-          )}
-        </div>
+        {/* Right: Emails a responder — streamed in via <Suspense /> in the parent */}
+        {emailsSlot}
       </div>
     </div>
   )
