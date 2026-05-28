@@ -4,6 +4,7 @@ import './globals.css'
 import { Toaster } from '@/components/ui/sonner'
 import { Sidebar } from '@/components/sidebar'
 import { Providers } from '@/components/providers'
+import { JobToaster } from '@/components/job-toaster'
 
 const outfit = Outfit({
   subsets: ['latin'],
@@ -29,6 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </main>
           </div>
           <Toaster richColors position="top-right" closeButton duration={6000} />
+          <JobToaster />
         </Providers>
       </body>
     </html>

@@ -81,29 +81,28 @@ export function Sidebar() {
   if (pathname === '/login') return null
 
   async function syncEmail(silent = false) {
+    // Fire-and-forget: dispatch to Inngest and return immediately. The actual
+    // IMAP work runs in the background; <JobToaster /> shows the completion
+    // toast via Supabase realtime when job_status is updated.
     setSyncing(true)
     try {
-      const res  = await fetch('/api/imap/sync')
-      const text = await res.text()
-      let data: Record<string, unknown>
-      try { data = JSON.parse(text) } catch { throw new Error(`Resposta inválida (HTTP ${res.status}): ${text.slice(0, 200)}`) }
+      const res = await fetch('/api/imap/sync-dispatch', { method: 'POST' })
+      const data = await res.json().catch(() => ({} as Record<string, unknown>))
+      if (!res.ok || !data.ok) {
+        throw new Error((data.error as string) ?? `HTTP ${res.status}`)
+      }
       localStorage.setItem('lastEmailSync', String(Date.now()))
-      if (data.ok) {
-        if (!silent || (data.synced as number) > 0) {
-          toast.success(`Sync concluído — ${data.synced} importados`, {
-            description: (data.skipped_duplicate as number) > 0
-              ? `${data.skipped_duplicate} duplicados ignorados · ${data.created_leads ?? 0} novos leads`
-              : `${data.created_leads ?? 0} novos leads criados`,
-            duration: Infinity,
-          })
-        }
-        if ((data.synced as number) > 0) router.refresh()
-      } else {
-        if (!silent) toast.error('Erro ao sincronizar email', { description: data.error as string, duration: Infinity })
+      if (!silent) {
+        toast.info('A sincronizar email…', {
+          description: 'O sync corre em segundo plano. Vais ser notificado quando terminar.',
+          duration: 5000,
+        })
       }
     } catch (e) {
-      if (!silent) toast.error('Erro ao sincronizar email', { description: String(e), duration: Infinity })
+      if (!silent) toast.error('Não consegui iniciar o sync', { description: String(e), duration: Infinity })
     } finally {
+      // Visual "syncing" only while the dispatch request is in flight (ms).
+      // Completion is signalled by the toast from <JobToaster />.
       setSyncing(false)
     }
   }
