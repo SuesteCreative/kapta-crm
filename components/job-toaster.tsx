@@ -123,6 +123,10 @@ export function JobToaster() {
         queryClient.invalidateQueries({ queryKey: ['emails', 'list'] })
         queryClient.invalidateQueries({ queryKey: ['follow-ups', 'inbound'] })
         router.refresh()
+      } else if (row.kind === 'ai_triage') {
+        // Triage wrote ai_triage metadata onto inbound interactions; the
+        // /follow-ups "Por responder" list reads it for the priority pills.
+        queryClient.invalidateQueries({ queryKey: ['follow-ups', 'inbound'] })
       }
     }
 
@@ -188,6 +192,7 @@ export function JobToaster() {
 function labelFor(kind: string): string {
   switch (kind) {
     case 'imap_sync': return 'Sync email'
+    case 'ai_triage': return 'Análise IA'
     default: return kind
   }
 }

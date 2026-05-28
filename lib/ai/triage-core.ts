@@ -1,0 +1,140 @@
+// AI inbox triage — extracted from /api/ai/triage-inbox so the Inngest
+// function can call it directly. Same logic as the original route, just
+// returns a typed result instead of NextResponse.
+
+import Anthropic from '@anthropic-ai/sdk'
+import { createServiceClient } from '@/lib/supabase'
+import { getAiMemory, memorySystemBlock } from '@/lib/ai-memory'
+
+const SYSTEM_PROMPT = `Triage emails for Pedro, Portuguese B2B account manager at Kapta.
+
+Return JSON array. Each item:
+- customer_id: string
+- priority: "urgent"|"high"|"medium"|"low"
+- category: "suporte"|"comercial"|"financeiro"|"feedback"|"reunião"|"informação"|"outro"
+- summary: string (PT, max 12 words, what client wants)
+- action: string (PT, max 10 words, what Pedro does)
+
+Priority: urgent=angry/down/contract risk; high=waiting>3d/blocked/payment; medium=question/scheduling; low=FYI/ack.
+JSON array only. No markdown.`
+
+export type TriageResult = {
+  customer_id: string
+  priority: 'urgent' | 'high' | 'medium' | 'low'
+  category: string
+  summary: string
+  action: string
+}
+
+export type TriageRunResult =
+  | { ok: true; results: TriageResult[]; total: number; message?: string }
+  | { ok: false; error: string }
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&[a-z]+;/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export async function runTriageInbox(): Promise<TriageRunResult> {
+  const supabase = createServiceClient()
+
+  const { data: allEmails } = await supabase
+    .from('interactions')
+    .select('id, customer_id, direction, subject, occurred_at, customers(id, name, company)')
+    .eq('type', 'email')
+    .order('occurred_at', { ascending: false })
+    .limit(500)
+
+  if (!allEmails || allEmails.length === 0) {
+    return { ok: true, results: [], total: 0, message: 'Sem emails para analisar.' }
+  }
+
+  const byCustomer = new Map<string, typeof allEmails[0]>()
+  for (const e of allEmails) {
+    if (!byCustomer.has(e.customer_id)) byCustomer.set(e.customer_id, e)
+  }
+
+  const needsReply: typeof allEmails = []
+  for (const [, email] of byCustomer) {
+    if (email.direction === 'inbound') needsReply.push(email)
+  }
+
+  if (needsReply.length === 0) {
+    return { ok: true, results: [], total: 0, message: 'Nenhum email por responder.' }
+  }
+
+  const batchIds = needsReply.slice(0, 15).map((e) => e.id)
+  const { data: batchWithContent } = await supabase
+    .from('interactions')
+    .select('id, customer_id, direction, subject, content, metadata, occurred_at, customers(id, name, company)')
+    .in('id', batchIds)
+
+  const batch = batchWithContent ?? needsReply.slice(0, 15)
+
+  const emailsText = batch.map((e) => {
+    const customer = Array.isArray(e.customers) ? e.customers[0] : e.customers
+    const name = customer ? `${customer.name}${customer.company ? ` (${customer.company})` : ''}` : 'Desconhecido'
+    const rawBody = ('content' in e && e.content) ? (e.content as string) : ''
+    let body = rawBody ? stripHtml(rawBody).slice(0, 400) : '(sem corpo)'
+    const meta = ('metadata' in e && e.metadata) ? (e.metadata as Record<string, unknown>) : null
+    const atts = (meta?.attachments as Array<{ name: string; ai_summary?: string }> | undefined) ?? []
+    if (atts.length > 0) body += ` [Attachments: ${atts.map((a) => `${a.name}: ${a.ai_summary ?? a.name}`).join(' | ')}]`
+    return JSON.stringify({
+      customer_id: e.customer_id,
+      from: name,
+      subject: e.subject ?? '(sem assunto)',
+      body,
+    })
+  }).join('\n')
+
+  const memory = await getAiMemory()
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+
+  let message
+  try {
+    message = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      system: [{ type: 'text', text: `${SYSTEM_PROMPT}${memorySystemBlock(memory)}`, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Analyze these emails and return a JSON array:\n\n${emailsText}` }],
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: `Claude error: ${msg}` }
+  }
+
+  const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
+  const match = rawText.match(/\[[\s\S]*\]/)
+  if (!match) {
+    return { ok: false, error: 'Claude returned unexpected format' }
+  }
+
+  let results: TriageResult[] = []
+  try {
+    results = JSON.parse(match[0])
+  } catch {
+    return { ok: false, error: 'Claude returned invalid JSON' }
+  }
+
+  await Promise.all(
+    results.map(async (r) => {
+      const email = batch.find((e) => e.customer_id === r.customer_id)
+      if (!email) return
+      const { data: existing } = await supabase
+        .from('interactions')
+        .select('metadata')
+        .eq('id', email.id)
+        .single()
+      const merged = { ...(existing?.metadata as Record<string, unknown> ?? {}), ai_triage: r }
+      await supabase.from('interactions').update({ metadata: merged }).eq('id', email.id)
+    })
+  )
+
+  return { ok: true, results, total: needsReply.length }
+}

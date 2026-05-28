@@ -278,18 +278,22 @@ export function FollowUpsClient({
 
   async function runTriage() {
     setTriaging(true)
+    // Fire-and-forget via Inngest dispatch. Triage runs in the background,
+    // writes results to interactions.metadata.ai_triage, and notifies the UI
+    // via job_status realtime. JobToaster invalidates the inbound query so
+    // the new triage shows up in the list without a refresh.
     try {
-      const res = await fetch('/api/ai/triage-inbox', { method: 'POST' })
-      const text = await res.text()
-      let json: { ok: boolean; results?: TriageResult[]; error?: string; total?: number }
-      try { json = JSON.parse(text) } catch { throw new Error('Servidor sem resposta — tente novamente.') }
-      if (!json.ok) throw new Error(json.error ?? 'Erro')
-      const map = new Map<string, TriageResult>()
-      for (const r of json.results ?? []) map.set(r.customer_id, r)
-      setTriageMap(map)
-      toast.success(`${(json.results ?? []).length} emails analisados por IA`)
+      const res = await fetch('/api/ai/triage-dispatch', { method: 'POST' })
+      const data = await res.json().catch(() => ({} as Record<string, unknown>))
+      if (!res.ok || !data.ok) {
+        throw new Error((data.error as string) ?? `HTTP ${res.status}`)
+      }
+      toast.info('A analisar emails com IA…', {
+        description: 'Corre em segundo plano. Vais ver os pills aparecer quando terminar.',
+        duration: 4000,
+      })
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao analisar emails.')
+      toast.error(e instanceof Error ? e.message : 'Erro ao iniciar análise.')
     } finally {
       setTriaging(false)
     }
