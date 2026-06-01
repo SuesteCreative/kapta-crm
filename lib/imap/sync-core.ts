@@ -14,8 +14,8 @@ import { createServiceClient } from '@/lib/supabase'
 import { analyzeAttachment } from '@/lib/analyze-attachment'
 import { decodeLegacyEmailContent, looksLikeLegacyEmail } from '@/lib/decode-legacy-email'
 import {
-  isFhIntegrationEmail, parseFhIntegrationEmail,
-  isFhConfirmationEmail, parseFhConfirmationEmail,
+  isFhIntegrationEmail, isFhIntegrationBody, parseFhIntegrationEmail,
+  isFhConfirmationEmail, isFhConfirmationBody, parseFhConfirmationEmail,
 } from '@/lib/fh-integration-parser'
 import { extractForwardedSender } from '@/lib/email-utils'
 import { isSpamSender } from '@/lib/spam-filter'
@@ -524,10 +524,15 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
           }
 
           if (!primarySenderEmail && bodyText && allFromAreTeam) {
-            const fromAddr = (fromList[0]?.address ?? '').toLowerCase().trim()
-            const subj = parsed.subject ?? null
-
-            if (/^site@kapta\.pt$/i.test(fromAddr) && isFhIntegrationEmail(fromAddr, subj, bodyText)) {
+            // A team member forwarded an automated submission (FH form or Kapta
+            // confirmation). The quoted "From:" is itself internal
+            // (site@/notificacoes@kapta.pt), so the only real counterparty is the
+            // partner email inside the template body. Detect by BODY, not sender,
+            // so forwards from ANY @kapta.pt mailbox (e.g. bruno@) are captured —
+            // otherwise these get dropped as "unknown" and never reach the inbox.
+            // Safe here: we're already gated on allFromAreTeam, so partner replies
+            // that merely quote the template (sender = partner) can't reach this.
+            if (isFhIntegrationBody(bodyText)) {
               const fhP = parseFhIntegrationEmail(bodyText)
               if (fhP.email && !isInternal(fhP.email)) {
                 primarySenderEmail = fhP.email
@@ -535,10 +540,10 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
                 const found = emailToCustomerId.get(fhP.email)
                 if (found) { customerId = found; matchedEmail = fhP.email }
               }
-            } else if (/^notificacoes@kapta\.pt$/i.test(fromAddr) && isFhConfirmationEmail(fromAddr, bodyText)) {
+            } else if (isFhConfirmationBody(bodyText)) {
               const recipient = toList.find((a) => a.address && !isInternal(a.address.toLowerCase().trim()))?.address?.toLowerCase().trim() ?? null
               const confP = parseFhConfirmationEmail(bodyText, recipient)
-              if (confP.email) {
+              if (confP.email && !isInternal(confP.email)) {
                 primarySenderEmail = confP.email
                 primarySenderName  = confP.name || confP.email.split('@')[0]
                 const found = emailToCustomerId.get(confP.email)
@@ -623,10 +628,13 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
           const date    = rawDate instanceof Date ? rawDate : new Date(rawDate)
 
           const fromForFh = fromList[0]?.address ?? primarySenderEmail
+          // Direct from site@kapta.pt OR forwarded by a team member (body match).
           const isFh = isFhIntegrationEmail(fromForFh, subject, bodyText)
+                    || (allFromAreTeam && isFhIntegrationBody(bodyText))
           const fhParsed = isFh ? parseFhIntegrationEmail(bodyText) : null
 
           const isFhConfirm = isFhConfirmationEmail(fromForFh, bodyText)
+                           || (allFromAreTeam && isFhConfirmationBody(bodyText))
           let fhConfirmBumpedId: string | null = null
           if (isFhConfirm && primarySenderEmail) {
             const { data: existingFh } = await supabase

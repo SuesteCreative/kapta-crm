@@ -61,6 +61,17 @@ export function parseFhIntegrationEmail(body: string | null | undefined): FhInte
   return out
 }
 
+// Body-only signal for the FH form template. Lets us recognise the request even
+// after a team member FORWARDS it (sender is no longer site@kapta.pt, but the
+// template — including this sentence — is quoted verbatim in the body).
+const FH_FORM_BODY_RE = /a new integration has been submitted via the fareharbor/i
+
+/** True if the body carries the FH form template, regardless of who sent it.
+ *  Caller must gate on an internal/team sender to avoid partner-reply quotes. */
+export function isFhIntegrationBody(body: string | null | undefined): boolean {
+  return !!body && FH_FORM_BODY_RE.test(body)
+}
+
 export function isFhIntegrationEmail(
   fromAddress: string | null | undefined,
   subject: string | null | undefined,
@@ -107,6 +118,12 @@ export function isFhConfirmationEmail(
   const fromMatches = !!fromAddress && /^notificacoes@kapta\.pt$/i.test(fromAddress.trim())
   if (!fromMatches) return false
   return CONFIRM_RE.body.test(body) && CONFIRM_RE.rioko.test(body)
+}
+
+/** Body-only confirmation signal — for team-forwarded confirmation emails
+ *  (sender no longer notificacoes@kapta.pt). Gate on an internal sender. */
+export function isFhConfirmationBody(body: string | null | undefined): boolean {
+  return !!body && CONFIRM_RE.body.test(body) && CONFIRM_RE.rioko.test(body)
 }
 
 export function parseFhConfirmationEmail(
