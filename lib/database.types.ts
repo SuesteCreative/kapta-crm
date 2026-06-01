@@ -220,6 +220,46 @@ export function countryFromInvoicingSystem(invoicing: string | null | undefined)
   return null
 }
 
+/** Normalized label for partners with no invoicing system. */
+export const FH_INVOICING_NONE_LABEL = 'None'
+
+// Known systems → canonical casing, so the filter dropdown never shows case dupes
+// (e.g. "vendus" and "Vendus" collapse to one entry).
+const FH_INVOICING_CANONICAL: Record<string, string> = {
+  igest: 'IGEST',
+  moloni: 'Moloni',
+  invoicexpress: 'InvoiceXpress',
+  'invoice xpress': 'InvoiceXpress',
+  vendus: 'Vendus',
+  holded: 'Holded',
+  billin: 'Billin',
+  sage: 'Sage',
+}
+
+// Raw expressions that all mean "no invoicing system" → folded to FH_INVOICING_NONE_LABEL.
+const FH_INVOICING_NONE = new Set([
+  'none', 'no_invoicing_system', 'no invoicing system', 'no-invoicing-system',
+  'n/a', 'na', 'n.a.', 'n.a', '-', '—', '–',
+  'nenhum', 'nenhuma', 'sem sistema', 'sem',
+  'ainda não temos', 'ainda nao temos', 'não temos', 'nao temos',
+  'não tenho', 'nao tenho', 'ainda não temos!', 'ainda nao temos!',
+  'no tengo', 'no tenemos', 'ninguno', 'ningún', 'ningun', 'nada',
+])
+
+/** Normalize a raw invoicing-system string for display + filtering.
+ *  - "no system" expressions (Ainda não temos, NO_INVOICING_SYSTEM, N/A, …) → "None"
+ *  - known systems → canonical casing (vendus → Vendus)
+ *  - unknown non-empty value → trimmed original (keeps the dropdown dynamic)
+ *  - empty/null → "None" */
+export function normalizeInvoicingSystem(raw: string | null | undefined): string {
+  if (!raw) return FH_INVOICING_NONE_LABEL
+  const trimmed = raw.trim()
+  if (!trimmed) return FH_INVOICING_NONE_LABEL
+  const v = trimmed.toLowerCase()
+  if (FH_INVOICING_NONE.has(v)) return FH_INVOICING_NONE_LABEL
+  return FH_INVOICING_CANONICAL[v] ?? trimmed
+}
+
 export const FH_STATUS_LABELS: Record<FhIntegrationStatus, string> = {
   new:              'Novo',
   onboarding:       'Onboarding',

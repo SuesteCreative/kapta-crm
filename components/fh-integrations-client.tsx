@@ -16,6 +16,7 @@ import { formatDate } from '@/lib/utils'
 import {
   FH_STATUS_LABELS, FH_STATUS_ORDER,
   FH_COUNTRY_ORDER, FH_COUNTRY_LABELS, normalizeFhCountry,
+  normalizeInvoicingSystem, FH_INVOICING_NONE_LABEL,
   type FhIntegration, type FhIntegrationStatus, type FhCountry,
 } from '@/lib/database.types'
 import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
@@ -95,6 +96,7 @@ export function FhIntegrationsClient({
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [countryFilter, setCountryFilter] = useState<'all' | FhCountry>('all')
+  const [invoicingFilter, setInvoicingFilter] = useState<string>('all')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogCtx, setDialogCtx] = useState<{ sourceId: string | null; prefill: FhIntegrationParsed | null } | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
@@ -104,31 +106,52 @@ export function FhIntegrationsClient({
 
   const q = search.trim().toLowerCase()
 
+  // Dynamic invoicing-system list, normalized + deduped across pending + active rows.
+  // Any new system that lands in a request shows up here automatically. "None" pinned last.
+  const invoicingOptions = useMemo(() => {
+    const byKey = new Map<string, string>()
+    const add = (raw: string | null | undefined) => {
+      const n = normalizeInvoicingSystem(raw)
+      byKey.set(n.toLowerCase(), n)
+    }
+    for (const p of pending) add(p.invoicing_system)
+    for (const r of rows) add(r.invoicing_system)
+    return [...byKey.values()].sort((a, b) => {
+      if (a === FH_INVOICING_NONE_LABEL) return 1
+      if (b === FH_INVOICING_NONE_LABEL) return -1
+      return a.localeCompare(b)
+    })
+  }, [pending, rows])
+
   const filteredPending = useMemo(() => pending.filter((p) => {
     if (countryFilter !== 'all') {
       const c = normalizeFhCountry(p.country) ?? 'other'
       if (c !== countryFilter) return false
     }
+    if (invoicingFilter !== 'all' && normalizeInvoicingSystem(p.invoicing_system) !== invoicingFilter) return false
     if (!q) return true
     return (
       (p.shortname?.toLowerCase().includes(q) ?? false) ||
       (p.name?.toLowerCase().includes(q) ?? false) ||
       (p.email?.toLowerCase().includes(q) ?? false) ||
       (p.invoicing_system?.toLowerCase().includes(q) ?? false) ||
+      normalizeInvoicingSystem(p.invoicing_system).toLowerCase().includes(q) ||
       (p.subject?.toLowerCase().includes(q) ?? false)
     )
-  }), [pending, countryFilter, q])
+  }), [pending, countryFilter, invoicingFilter, q])
 
   const filteredIntegrations = useMemo(() => rows.filter((r) => {
     if (countryFilter !== 'all' && r.country !== countryFilter) return false
+    if (invoicingFilter !== 'all' && normalizeInvoicingSystem(r.invoicing_system) !== invoicingFilter) return false
     if (!q) return true
     return (
       r.shortname.toLowerCase().includes(q) ||
       r.name.toLowerCase().includes(q) ||
       r.email.toLowerCase().includes(q) ||
-      (r.invoicing_system?.toLowerCase().includes(q) ?? false)
+      (r.invoicing_system?.toLowerCase().includes(q) ?? false) ||
+      normalizeInvoicingSystem(r.invoicing_system).toLowerCase().includes(q)
     )
-  }), [rows, countryFilter, q])
+  }), [rows, countryFilter, invoicingFilter, q])
 
   // Group integrations by status
   const byStatus = useMemo(() => {
@@ -281,6 +304,15 @@ export function FhIntegrationsClient({
             ))}
           </SelectContent>
         </Select>
+        <Select value={invoicingFilter} onValueChange={setInvoicingFilter}>
+          <SelectTrigger className="h-9 w-48 text-sm rounded-lg"><SelectValue placeholder="Faturação" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os sistemas</SelectItem>
+            {invoicingOptions.map((s) => (
+              <SelectItem key={s} value={s}>{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Endpoint failure banner — keeps page working if the admin pull errored. */}
@@ -383,11 +415,9 @@ export function FhIntegrationsClient({
                           })()}
                         </span>
                       )}
-                      {p.invoicing_system && (
-                        <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
-                          {p.invoicing_system}
-                        </span>
-                      )}
+                      <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
+                        {normalizeInvoicingSystem(p.invoicing_system)}
+                      </span>
                     </div>
                   </button>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
@@ -475,11 +505,9 @@ export function FhIntegrationsClient({
                             {FH_COUNTRY_LABELS[r.country] ?? r.country}
                           </span>
                         )}
-                        {r.invoicing_system && (
-                          <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
-                            {r.invoicing_system}
-                          </span>
-                        )}
+                        <span className="rounded-full px-2 py-0.5" style={{ background: 'var(--muted)' }}>
+                          {normalizeInvoicingSystem(r.invoicing_system)}
+                        </span>
                         {r.customers && (
                           <span className="rounded-full px-2 py-0.5" style={{ background: 'rgba(91,91,214,0.08)', color: 'var(--primary)' }}>
                             {r.customers.name}{r.customers.company ? ` · ${r.customers.company}` : ''}
