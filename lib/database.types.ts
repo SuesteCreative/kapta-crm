@@ -257,6 +257,11 @@ export function normalizeInvoicingSystem(raw: string | null | undefined): string
   if (!trimmed) return FH_INVOICING_NONE_LABEL
   const v = trimmed.toLowerCase()
   if (FH_INVOICING_NONE.has(v)) return FH_INVOICING_NONE_LABEL
+  // "Own/proprietary system" variants, possibly with a company-name prefix
+  // (e.g. "creuers sistema propio") → single canonical entry.
+  if (/(?:sistema\s+pr[oó]pr?io|private\s+software|own\s+system|propriet)/i.test(trimmed)) {
+    return 'Private Software'
+  }
   return FH_INVOICING_CANONICAL[v] ?? trimmed
 }
 
