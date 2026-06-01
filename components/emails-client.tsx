@@ -198,7 +198,7 @@ function formatBytes(n?: number): string {
 
 // Fetches the same shape the server-side page fetches, so the useQuery
 // initialData hand-off is a no-op on first paint.
-async function fetchEmailsList(): Promise<EmailRow[]> {
+async function fetchEmailsList(limit: number): Promise<EmailRow[]> {
   const fullSelect = `
     id, customer_id, direction, subject, occurred_at, metadata, is_read,
     customers ( id, name, company, customer_identifiers ( type, value ) )
@@ -208,26 +208,33 @@ async function fetchEmailsList(): Promise<EmailRow[]> {
     .select(fullSelect)
     .eq('type', 'email')
     .order('occurred_at', { ascending: false })
-    .limit(200)
+    .limit(limit)
   if (error) throw error
   return (data ?? []) as unknown as EmailRow[]
 }
+
+const PAGE_SIZE = 200
 
 export const EMAILS_LIST_QUERY_KEY = ['emails', 'list'] as const
 
 export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) {
   const router = useRouter()
   const queryClient = useQueryClient()
-  const { data: emails = initialEmails } = useQuery({
-    queryKey: EMAILS_LIST_QUERY_KEY,
-    queryFn: fetchEmailsList,
-    initialData: initialEmails,
+  const [listLimit, setListLimit]       = useState(PAGE_SIZE)
+  const { data: emails = initialEmails, isFetching: listFetching } = useQuery({
+    queryKey: [...EMAILS_LIST_QUERY_KEY, listLimit] as const,
+    queryFn: () => fetchEmailsList(listLimit),
+    initialData: listLimit === PAGE_SIZE ? initialEmails : undefined,
     // initialData was server-rendered in this render — keep it fresh for the
     // current SSR window, then let staleTime (30s, from Providers) drive
     // background refetches.
     initialDataUpdatedAt: Date.now(),
   })
   const [search, setSearch]             = useState('')
+  // Server-side search results (whole table, any age) — used instead of the
+  // locally-loaded page whenever the user is actively searching.
+  const [serverResults, setServerResults] = useState<EmailRow[] | null>(null)
+  const [searchLoading, setSearchLoading] = useState(false)
   const [filter, setFilter]             = useState<InboxFilter>('all')
   const [syncing, setSyncing]           = useState(false)
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
@@ -281,6 +288,31 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
   useEffect(() => {
     localStorage.setItem(UNREAD_ON_TOP_STORAGE_KEY, unreadOnTop ? '1' : '0')
   }, [unreadOnTop])
+
+  // Debounced server-side search across the WHOLE table (not just the loaded
+  // page). Empty / <2 chars → fall back to the local list.
+  useEffect(() => {
+    const q = search.trim()
+    if (q.length < 2) {
+      setServerResults(null)
+      setSearchLoading(false)
+      return
+    }
+    setSearchLoading(true)
+    let cancelled = false
+    const t = setTimeout(() => {
+      fetch(`/api/emails/search?q=${encodeURIComponent(q)}`)
+        .then((r) => r.json())
+        .then((json) => {
+          if (cancelled) return
+          if (json.ok) setServerResults(json.emails ?? [])
+          else { setServerResults([]); toast.error('Erro na pesquisa', { description: json.error }) }
+        })
+        .catch((e) => { if (!cancelled) { setServerResults([]); toast.error('Erro na pesquisa', { description: String(e) }) } })
+        .finally(() => { if (!cancelled) setSearchLoading(false) })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [search])
 
   // Fetch stale threads on mount
   useEffect(() => {
@@ -438,7 +470,7 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
       .then(() => { if (!cancelled) setContentLoading(false) })
 
     // Mark as read on selection (idempotent + optimistic)
-    const target = emails.find((e) => e.id === selectedId)
+    const target = [...emails, ...(serverResults ?? [])].find((e) => e.id === selectedId)
     if (target && !target.is_read && !readIds.has(selectedId) && !unreadIds.has(selectedId)) {
       const idToMark = selectedId
       setReadIds((prev) => new Set([...prev, idToMark]))
@@ -457,7 +489,7 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
 
   async function toggleUnread(id: string, ev: ReactMouseEvent) {
     ev.stopPropagation()
-    const email = emails.find((e) => e.id === id)
+    const email = [...emails, ...(serverResults ?? [])].find((e) => e.id === id)
     if (!email) return
     const currentlyRead = isReadEffective(email)
     if (currentlyRead) {
@@ -543,9 +575,14 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
     }
   }
 
+  // When the user is searching, the list comes from the server (whole table,
+  // any age). Otherwise it's the locally-loaded page.
+  const isSearching = search.trim().length >= 2
+  const sourceEmails = isSearching && serverResults ? serverResults : emails
+
   // Pre-compute "needs reply": inbound emails with no later outbound for the same customer.
   const lastOutboundByCustomer = new Map<string, string>()
-  for (const e of emails) {
+  for (const e of sourceEmails) {
     if (e.direction !== 'outbound') continue
     const prev = lastOutboundByCustomer.get(e.customer_id)
     if (!prev || e.occurred_at > prev) lastOutboundByCustomer.set(e.customer_id, e.occurred_at)
@@ -556,22 +593,12 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
     return !lastOut || lastOut < e.occurred_at
   }
 
-  const baseVisible = emails.filter((e) => e.metadata?.is_spam !== true && !dismissedIds.has(e.id))
+  const baseVisible = sourceEmails.filter((e) => e.metadata?.is_spam !== true && !dismissedIds.has(e.id))
   const needsReplyCount = baseVisible.filter(needsReply).length
   const unreadCount     = baseVisible.filter((e) => !isReadEffective(e)).length
 
   const filtered = baseVisible.filter((e) => {
-    const q = search.toLowerCase()
-    const matchesSearch =
-      !search ||
-      (e.subject ?? '').toLowerCase().includes(q) ||
-      (e.customers?.name ?? '').toLowerCase().includes(q) ||
-      (e.customers?.company ?? '').toLowerCase().includes(q) ||
-      (e.customers?.customer_identifiers ?? []).some((i) =>
-        i.value.toLowerCase().includes(q),
-      ) ||
-      (e.metadata?.matched_email as string | undefined ?? '').toLowerCase().includes(q)
-    if (!matchesSearch) return false
+    // Search is applied server-side when isSearching, so don't re-filter here.
     if (filter === 'all')         return true
     if (filter === 'inbound')     return e.direction === 'inbound'
     if (filter === 'outbound')    return e.direction === 'outbound'
@@ -600,7 +627,9 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
             Emails
           </h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-            {emails.length - dismissedIds.size} emails sincronizados
+            {isSearching
+              ? `${baseVisible.length} resultado${baseVisible.length === 1 ? '' : 's'} para "${search.trim()}"`
+              : `${emails.length - dismissedIds.size} emails carregados`}
           </p>
         </div>
         <div className="flex items-center gap-2 relative">
@@ -720,16 +749,27 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
             style={{ color: 'var(--muted-foreground)' }}
           />
           <Input
-            className="pl-9 h-9 w-[280px] text-sm rounded-lg"
+            className="pl-9 pr-9 h-9 w-[280px] text-sm rounded-lg"
             style={{
               background: 'var(--card)',
               border: '1px solid var(--border)',
               color: 'var(--foreground)',
             }}
-            placeholder="Pesquisar assunto, cliente…"
+            placeholder="Pesquisar email, cliente, assunto…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          {searchLoading
+            ? <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin" style={{ color: 'var(--muted-foreground)' }} />
+            : search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 hover:opacity-70"
+                title="Limpar pesquisa"
+              >
+                <X className="h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />
+              </button>
+            )}
         </div>
 
         <div className="flex gap-1.5">
@@ -859,7 +899,13 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
         >
           {filtered.length === 0 && (
             <div className="px-5 py-12 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>
-              {emails.length === 0 ? 'Nenhum email sincronizado. Clica em Sincronizar.' : 'Nenhum resultado.'}
+              {searchLoading
+                ? 'A pesquisar…'
+                : isSearching
+                  ? `Nenhum email encontrado para "${search.trim()}".`
+                  : emails.length === 0
+                    ? 'Nenhum email sincronizado. Clica em Sincronizar.'
+                    : 'Nenhum resultado.'}
             </div>
           )}
 
@@ -1002,6 +1048,21 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
               </div>
             )
           })}
+
+          {/* Load more — only when browsing (not searching) and the page is full,
+              so older emails beyond the loaded window are reachable. */}
+          {!isSearching && emails.length >= listLimit && (
+            <button
+              onClick={() => setListLimit((n) => n + PAGE_SIZE)}
+              disabled={listFetching}
+              className="w-full px-5 py-3 text-[12.5px] font-medium hover:bg-[var(--border)] disabled:opacity-50 flex items-center justify-center gap-2"
+              style={{ color: 'var(--primary)' }}
+            >
+              {listFetching
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> A carregar…</>
+                : `Carregar mais ${PAGE_SIZE}`}
+            </button>
+          )}
         </div>
 
         {/* Preview panel */}
