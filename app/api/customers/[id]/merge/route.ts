@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import { mergeCustomers } from '@/lib/merge-customers'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,37 +16,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: false, error: 'source_id inválido' }, { status: 400 })
   }
 
-  // Move child records (all tables with customer_id FK to customers).
-  // fh_integrations and email_drafts use ON DELETE SET NULL, so reassign
-  // them here so the merge doesn't drop the link.
-  const [r1, r2, r3, r4, r5] = await Promise.all([
-    supabase.from('interactions').update({ customer_id: targetId }).eq('customer_id', source_id),
-    supabase.from('follow_ups').update({ customer_id: targetId }).eq('customer_id', source_id),
-    supabase.from('tickets').update({ customer_id: targetId }).eq('customer_id', source_id),
-    supabase.from('fh_integrations').update({ customer_id: targetId }).eq('customer_id', source_id),
-    supabase.from('email_drafts').update({ primary_customer_id: targetId }).eq('primary_customer_id', source_id),
-  ])
-  const moveError = r1.error ?? r2.error ?? r3.error ?? r4.error ?? r5.error
-  if (moveError) return NextResponse.json({ ok: false, error: moveError.message }, { status: 500 })
-
-  // Move identifiers — skip duplicates
-  const [{ data: targetIds }, { data: sourceIds }] = await Promise.all([
-    supabase.from('customer_identifiers').select('type, value').eq('customer_id', targetId),
-    supabase.from('customer_identifiers').select('id, type, value').eq('customer_id', source_id),
-  ])
-
-  const targetSet = new Set((targetIds ?? []).map((i) => `${i.type}:${i.value.toLowerCase()}`))
-  const toMove   = (sourceIds ?? []).filter((i) => !targetSet.has(`${i.type}:${i.value.toLowerCase()}`))
-  const toDelete = (sourceIds ?? []).filter((i) =>  targetSet.has(`${i.type}:${i.value.toLowerCase()}`))
-
-  await Promise.all([
-    toMove.length   > 0 && supabase.from('customer_identifiers').update({ customer_id: targetId }).in('id', toMove.map((i) => i.id)),
-    toDelete.length > 0 && supabase.from('customer_identifiers').delete().in('id', toDelete.map((i) => i.id)),
-  ])
-
-  // Delete source customer
-  const { error: delErr } = await supabase.from('customers').delete().eq('id', source_id)
-  if (delErr) return NextResponse.json({ ok: false, error: delErr.message }, { status: 500 })
-
+  const result = await mergeCustomers(supabase, targetId, source_id)
+  if (!result.ok) return NextResponse.json(result, { status: 500 })
   return NextResponse.json({ ok: true })
 }

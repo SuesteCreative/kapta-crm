@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Plug, CheckCircle2, UserPlus, CalendarCheck, Save, Loader2,
-  Mail, Trash2, Send, Lock, Key, Wrench, Rocket,
+  Mail, Trash2, Send, Lock, Key, Wrench, Rocket, GitMerge,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import { formatDateTime } from '@/lib/utils'
 import { FollowUpDialog } from '@/components/follow-up-dialog'
+import { FhMergeDialog } from '@/components/fh-merge-dialog'
 import { SendEmailDialog, type EmailContact } from '@/components/send-email-dialog'
 import { InteractionsTimeline } from '@/components/interactions-timeline'
 import {
@@ -58,6 +59,7 @@ export function FhIntegrationDetailClient({ fh, sourceEmail, interactions }: Pro
   const [converting, setConverting] = useState(false)
   const [followUpOpen, setFollowUpOpen] = useState(false)
   const [deleting, setDeleting]     = useState(false)
+  const [mergeOpen, setMergeOpen]   = useState(false)
   const [markingIntegration, setMarkingIntegration] = useState(false)
 
   type SendMode = 'compose' | 'onboarding' | 'reply'
@@ -469,6 +471,15 @@ Se tiver alguma questão, não hesite em contactar.`
           Follow-up
         </Button>
         <div className="flex-1" />
+        <Button
+          onClick={() => setMergeOpen(true)}
+          variant="outline"
+          className="gap-1.5"
+          title="Unir com outra integração duplicada da mesma empresa"
+        >
+          <GitMerge className="h-4 w-4" />
+          Unir duplicado
+        </Button>
         <Button onClick={handleDelete} disabled={deleting} variant="outline" className="gap-1.5" style={{ color: '#C0272B' }}>
           {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
           Apagar
@@ -693,6 +704,12 @@ Se tiver alguma questão, não hesite em contactar.`
           onClose={() => setSendOpen(false)}
         />
       )}
+
+      <FhMergeDialog
+        open={mergeOpen}
+        current={{ id: fh.id, name: fh.name, shortname: fh.shortname, email: fh.email, status: fh.status }}
+        onClose={() => setMergeOpen(false)}
+      />
     </div>
   )
 }
