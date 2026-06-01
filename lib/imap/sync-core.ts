@@ -41,6 +41,16 @@ function isAutomatedSender(email: string): boolean {
   return AUTOMATED_PREFIXES.some((p) => local === p || local.startsWith(p + '-') || local.startsWith(p + '_'))
 }
 
+// A forwarded message — by subject prefix (Fwd:/Fw:/Enc:) or a forwarded-block
+// marker in the body. Used to keep team forwards out of the "unknown" drop bin.
+const FORWARD_SUBJECT_RE = /^\s*(?:fwd?|fw|enc)\s*[:\]]/i
+const FORWARD_BODY_RE = /(begin forwarded message|-{2,}\s*forwarded message|forwarded message\s*-{2,}|mensagem reencaminhada|in[íi]cio da mensagem reencaminhada)/i
+function isForwardedEmail(subject: string | null | undefined, body: string | null | undefined): boolean {
+  if (subject && FORWARD_SUBJECT_RE.test(subject)) return true
+  if (body && FORWARD_BODY_RE.test(body)) return true
+  return false
+}
+
 const PERSONAL_DOMAINS = new Set([
   'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.co.uk', 'hotmail.fr',
   'outlook.com', 'outlook.pt', 'live.com', 'msn.com', 'yahoo.com', 'yahoo.co.uk',
@@ -270,6 +280,34 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
     if (created.domain) companyByDomain.set(created.domain.toLowerCase(), entry)
     companyByName.set(created.name.toLowerCase(), entry)
     return entry
+  }
+
+  // Catch-all customer for team-forwarded emails we can't tie to a real external
+  // party (e.g. a forwarded automated "New Form Submission"). Without this they'd
+  // be dropped as "unknown" and never reach the inbox. Find-or-create, memoized
+  // for the run. Has no email identifier, so inbound resolution never matches it.
+  const INTERNAL_BUCKET_NAME = 'Interno · Reencaminhados'
+  let internalBucketId: string | null = null
+  let internalBucketResolved = false
+  async function ensureInternalBucket(): Promise<string | null> {
+    if (internalBucketResolved) return internalBucketId
+    const { data: existing } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('name', INTERNAL_BUCKET_NAME)
+      .maybeSingle()
+    if (existing) {
+      internalBucketId = existing.id
+    } else {
+      const { data: createdBucket } = await supabase
+        .from('customers')
+        .insert({ name: INTERNAL_BUCKET_NAME, status: 'onboarding', health_score: 3 })
+        .select('id')
+        .single()
+      internalBucketId = createdBucket?.id ?? null
+    }
+    internalBucketResolved = true
+    return internalBucketId
   }
 
   const { data: liveFhRows } = await supabase
@@ -552,7 +590,17 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
             }
           }
 
-          if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail && isAutomatedSender(primarySenderEmail)) {
+          // Kept even when we can't pin an external party: a team member
+          // forwarded it on purpose, so it must not silently vanish.
+          const isTeamForward =
+            effectiveDirection === 'inbound' && allFromAreTeam &&
+            isForwardedEmail(parsed.subject ?? null, bodyText)
+
+          // Automated original sender (noreply/notifications/…): skip — UNLESS a
+          // team member forwarded it, in which case fall through to the internal
+          // catch-all bucket below so it still reaches the inbox.
+          if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail
+              && isAutomatedSender(primarySenderEmail) && !isTeamForward) {
             unknown++; continue
           }
 
@@ -564,7 +612,12 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
             unknown++; continue
           }
 
-          if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail) {
+          // Real external sender (incl. a forwarded real person) → create the lead
+          // and attach. Automated senders never reach here on a normal inbound
+          // (skipped above); on a team forward we deliberately skip lead creation
+          // so noreply@ doesn't become a customer — it falls to the bucket instead.
+          if (!customerId && effectiveDirection === 'inbound' && primarySenderEmail
+              && !isAutomatedSender(primarySenderEmail)) {
             const senderName = primarySenderName || primarySenderEmail.split('@')[0]
 
             const company = await ensureCompany(primarySenderEmail, primarySenderName)
@@ -618,6 +671,19 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
                 const found = emailToCustomerId.get(fwd.email)
                 if (found) { customerId = found; matchedEmail = fwd.email }
               }
+            }
+          }
+
+          // Team-forwarded but still unresolved (e.g. a forwarded automated form
+          // notification): park under the internal catch-all so it stays visible
+          // on the email page instead of being dropped as "unknown".
+          let attachedToBucket = false
+          if (!customerId && isTeamForward) {
+            const bucket = await ensureInternalBucket()
+            if (bucket) {
+              customerId = bucket
+              matchedEmail = primarySenderEmail || ''
+              attachedToBucket = true
             }
           }
 
@@ -712,6 +778,7 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
               ...(fhConfirmBumpedId ? { fh_confirmation_bumped: fhConfirmBumpedId } : {}),
               ...(troubleshootHint ? { fh_troubleshoot_hint: true, fh_troubleshoot_match: troubleshootMatch } : {}),
               ...(detectedPlatforms.length > 0 ? { detected_platforms: detectedPlatforms } : {}),
+              ...(attachedToBucket ? { internal_forward: true } : {}),
             },
             is_read:     effectiveDirection === 'outbound',
             occurred_at: date.toISOString(),
