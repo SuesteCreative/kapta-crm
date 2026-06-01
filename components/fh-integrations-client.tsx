@@ -21,7 +21,7 @@ import {
 } from '@/lib/database.types'
 import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
 import { FhIntegrationDialog } from '@/components/fh-integration-dialog'
-import { convertPendingToIntegration, shortnameToCompanyGuess } from '@/lib/customer-resolver'
+import { convertPendingToIntegration, shortnameToCompanyGuess, findSameDomainIntegrations } from '@/lib/customer-resolver'
 
 type Row = FhIntegration & {
   customers: { id: string; name: string; company: string | null } | null
@@ -188,6 +188,16 @@ export function FhIntegrationsClient({
       openPendingDialog(p)
       return
     }
+
+    // Warn before creating a likely duplicate of an existing same-domain integration.
+    const dupes = await findSameDomainIntegrations(p.email)
+    if (dupes.length > 0) {
+      const list = dupes.map((d) => `• ${d.name} (${d.shortname}) — ${FH_STATUS_LABELS[d.status]}`).join('\n')
+      if (!confirm(`Já existe integração com o mesmo domínio:\n\n${list}\n\nÉ a mesma empresa? Se sim, cancela e usa "Unir duplicado". Criar mesmo assim?`)) {
+        return
+      }
+    }
+
     const key = pendingKey(p)
     setConverting((s) => ({ ...s, [key]: true }))
     try {

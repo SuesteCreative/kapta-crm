@@ -19,8 +19,8 @@ import {
 import type { FhIntegrationParsed } from '@/lib/fh-integration-parser'
 import {
   findCustomerByEmail, deriveCompanyFromSender, isPersonalDomain,
-  shortnameToCompanyGuess, resolveOrCreateCustomerForFh,
-  type FindCustomerResult, type DerivedCompany,
+  shortnameToCompanyGuess, resolveOrCreateCustomerForFh, findSameDomainIntegrations,
+  type FindCustomerResult, type DerivedCompany, type SameDomainIntegration,
 } from '@/lib/customer-resolver'
 
 interface Props {
@@ -63,6 +63,7 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
   const [resolver, setResolver] = useState<ResolverState>({ kind: 'idle' })
   const [companyOverride, setCompanyOverride] = useState('')
   const [editingBusiness, setEditingBusiness] = useState(false)
+  const [sameDomain, setSameDomain] = useState<SameDomainIntegration[]>([])
 
   useEffect(() => {
     if (!open) return
@@ -79,6 +80,7 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
     setResolver({ kind: 'idle' })
     setCompanyOverride('')
     setEditingBusiness(false)
+    setSameDomain([])
   }, [open, prefill])
 
   // Re-resolve whenever email or name changes (debounced via simple effect; small payload).
@@ -87,11 +89,15 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
     const email = form.email.trim().toLowerCase()
     if (!email || !email.includes('@')) {
       setResolver({ kind: 'no-email' })
+      setSameDomain([])
       return
     }
 
     let cancelled = false
     setResolver({ kind: 'loading' })
+
+    // Surface existing integrations on the same business domain (likely dupes).
+    findSameDomainIntegrations(email).then((rows) => { if (!cancelled) setSameDomain(rows) })
 
     ;(async () => {
       const existing = await findCustomerByEmail(email)
@@ -133,6 +139,14 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
     if (!form.shortname.trim()) { toast.error('Shortname obrigatório.'); return }
     if (!form.name.trim())      { toast.error('Nome obrigatório.'); return }
     if (!form.email.trim())     { toast.error('Email obrigatório.'); return }
+
+    // Guard against creating a duplicate of an existing same-domain integration.
+    if (sameDomain.length > 0) {
+      const list = sameDomain.map((d) => `• ${d.name} (${d.shortname}) — ${FH_STATUS_LABELS[d.status]}`).join('\n')
+      if (!confirm(`Já existe integração com o mesmo domínio:\n\n${list}\n\nÉ a mesma empresa? Se sim, cancela e usa "Unir duplicado". Criar mesmo assim?`)) {
+        return
+      }
+    }
 
     setLoading(true)
     try {
@@ -283,6 +297,34 @@ export function FhIntegrationDialog({ open, sourceInteractionId, prefill, onClos
             editingBusiness={editingBusiness}
             setEditingBusiness={setEditingBusiness}
           />
+
+          {/* Same-domain warning — likely duplicate of an existing integration */}
+          {sameDomain.length > 0 && (
+            <div
+              className="rounded-lg p-3 space-y-1.5"
+              style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}
+            >
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" style={{ color: '#B45309' }} />
+                <div>
+                  <p className="text-[12.5px] font-medium" style={{ color: '#B45309' }}>
+                    Já existe integração com este domínio
+                  </p>
+                  <p className="text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
+                    Confirma se é a mesma empresa. Se for, cancela e usa «Unir duplicado» em vez de criar outra.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-0.5 pl-6">
+                {sameDomain.map((d) => (
+                  <p key={d.id} className="text-[12px]" style={{ color: 'var(--foreground)' }}>
+                    {d.name} <span className="font-mono text-[11px]" style={{ color: 'var(--muted-foreground)' }}>{d.shortname}</span>
+                    {' · '}<span style={{ color: 'var(--muted-foreground)' }}>{FH_STATUS_LABELS[d.status]}</span>
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

@@ -95,6 +95,33 @@ export async function ensureCompany(input: { name: string; domain: string | null
   return created as CompanyRow
 }
 
+export interface SameDomainIntegration {
+  id: string
+  name: string
+  shortname: string
+  email: string
+  status: FhIntegrationStatus
+}
+
+/**
+ * Existing FH integrations that share this email's business domain — used to
+ * warn before creating a likely duplicate (dedup otherwise only matches exact
+ * shortname/email). Returns [] for personal domains (gmail/hotmail/…), where a
+ * shared domain says nothing about the company.
+ */
+export async function findSameDomainIntegrations(email: string): Promise<SameDomainIntegration[]> {
+  const value = email.toLowerCase().trim()
+  const domain = value.split('@')[1] ?? ''
+  if (!domain || isPersonalDomain(value)) return []
+
+  const { data } = await supabase
+    .from('fh_integrations')
+    .select('id, name, shortname, email, status')
+    .ilike('email', `%@${domain}`)
+
+  return (data ?? []) as SameDomainIntegration[]
+}
+
 export interface FindCustomerResult {
   customer_id: string
   name: string
