@@ -978,7 +978,7 @@ export function CustomerDetailClient({ customer, interactions: initialInteractio
                       </div>
                     )}
 
-                    {/* Bubbles embed */}
+                    {/* Meeting recording (Calendly recap / Bubbles) */}
                     {i.bubbles_url && (
                       <div
                         className="flex items-center gap-3 rounded-lg px-3 py-2.5 mt-1"
@@ -989,7 +989,7 @@ export function CustomerDetailClient({ customer, interactions: initialInteractio
                       >
                         <Video className="h-4 w-4 shrink-0" style={{ color: '#8B5CF6' }} />
                         <span className="text-sm font-medium flex-1 truncate" style={{ color: '#6D28D9' }}>
-                          {i.bubbles_title ?? 'Gravação Bubbles'}
+                          {i.bubbles_title ?? ((i.metadata as Record<string, unknown> | null)?.source === 'calendly_notetaker' ? 'Gravação Calendly' : 'Gravação')}
                         </span>
                         <div className="flex gap-1.5 shrink-0">
                           <button

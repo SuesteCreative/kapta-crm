@@ -17,6 +17,9 @@ import {
   isFhIntegrationEmail, isFhIntegrationBody, parseFhIntegrationEmail,
   isFhConfirmationEmail, isFhConfirmationBody, parseFhConfirmationEmail,
 } from '@/lib/fh-integration-parser'
+import {
+  isCalendlyRecapEmail, parseCalendlyRecap, isHostAttendee, nameMatches,
+} from '@/lib/calendly-recap-parser'
 import { extractForwardedSender } from '@/lib/email-utils'
 import { isSpamSender } from '@/lib/spam-filter'
 import { detectPlatforms } from '@/lib/platform-detector'
@@ -310,6 +313,27 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
     return internalBucketId
   }
 
+  // Name-based attendee → customer match for Calendly recap emails (recaps carry
+  // display names, not emails). Lazily loaded once, only if a recap shows up.
+  let customerNameList: { id: string; name: string }[] | null = null
+  async function matchCustomerByAttendeeNames(names: string[]): Promise<string | null> {
+    const externals = names.filter((n) => n && !isHostAttendee(n))
+    if (externals.length === 0) return null
+    if (!customerNameList) {
+      const { data } = await supabase.from('customers').select('id, name')
+      customerNameList = (data ?? []) as { id: string; name: string }[]
+    }
+    const matched = new Set<string>()
+    for (const attendee of externals) {
+      for (const c of customerNameList) {
+        if (c.name && nameMatches(attendee, c.name)) matched.add(c.id)
+      }
+    }
+    // Only link on a single unambiguous match — otherwise it goes to the
+    // "unlinked meetings" widget for Pedro to assign manually.
+    return matched.size === 1 ? [...matched][0] : null
+  }
+
   const { data: liveFhRows } = await supabase
     .from('fh_integrations')
     .select('customer_id')
@@ -550,6 +574,66 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
 
           const bodyText = (parsed.text ?? '').trim().slice(0, 4000)
           const bodyHtml = typeof parsed.html === 'string' ? parsed.html.slice(0, 100000) : null
+
+          // ── Calendly Notetaker recap → store as a meeting, not an email ─────
+          // Sent by notifications@calendly.com (an automated sender that the
+          // normal flow would otherwise drop). Parse it, match the attendee by
+          // name, and create a `type='meeting'` interaction — or park it in
+          // unlinked_meetings for manual assignment. Then skip email handling.
+          const fromAddr0 = (fromList[0]?.address ?? '').toLowerCase().trim()
+          if (effectiveDirection === 'inbound' && isCalendlyRecapEmail(fromAddr0, parsed.subject, bodyText)) {
+            const recap = parseCalendlyRecap(parsed.text ?? bodyText, bodyHtml)
+            const recapTitle = recap.title || parsed.subject || 'Reunião Calendly'
+            const recapFallbackDate = (msg.internalDate instanceof Date ? msg.internalDate : new Date()).toISOString()
+            const recapOccurredAt = recap.occurredAt ?? recapFallbackDate
+
+            const parts: string[] = []
+            if (recap.summary)    parts.push(`Resumo:\n${recap.summary}`)
+            if (recap.discussion) parts.push(`Discussão:\n${recap.discussion}`)
+            const recapContent = parts.join('\n\n') || bodyText || '(sem conteúdo)'
+
+            const matchedCustomer = await matchCustomerByAttendeeNames(recap.attendeeNames)
+
+            if (matchedCustomer) {
+              // source_id = messageId → idempotent (envelope dedup skips re-fetch).
+              await supabase.from('interactions').insert({
+                customer_id: matchedCustomer,
+                type:        'meeting',
+                direction:   null,
+                subject:     recapTitle,
+                content:     recapContent,
+                source_id:   messageId,
+                bubbles_url:   recap.recapUrl,
+                bubbles_title: recapTitle,
+                metadata:    { source: 'calendly_notetaker' },
+                occurred_at: recapOccurredAt,
+              })
+            } else {
+              // unlinked_meetings has no source_id, so dedup before parking to
+              // avoid re-inserting the same recap on every sync.
+              let already = false
+              if (recap.recapUrl) {
+                const { data } = await supabase.from('unlinked_meetings')
+                  .select('id').eq('bubbles_url', recap.recapUrl).limit(1).maybeSingle()
+                already = !!data
+              } else {
+                const { data } = await supabase.from('unlinked_meetings')
+                  .select('id').eq('title', recapTitle).eq('recorded_at', recapOccurredAt).limit(1).maybeSingle()
+                already = !!data
+              }
+              if (!already) {
+                await supabase.from('unlinked_meetings').insert({
+                  title:       recapTitle,
+                  summary:     recap.summary || null,
+                  transcript:  recap.discussion || null,
+                  bubbles_url: recap.recapUrl,
+                  attendees:   recap.attendeeNames,
+                  recorded_at: recapOccurredAt,
+                })
+              }
+            }
+            continue
+          }
 
           if (!primarySenderEmail && effectiveDirection === 'inbound' && allFromAreTeam && bodyText) {
             const fwd = extractForwardedSender(bodyText)

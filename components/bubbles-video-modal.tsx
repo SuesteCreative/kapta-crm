@@ -15,10 +15,10 @@ export function BubblesVideoModal({ url, onClose }: Props) {
     <Dialog open={!!url} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-4xl w-full p-0 overflow-hidden">
         <DialogHeader className="px-5 py-3 border-b flex flex-row items-center justify-between">
-          <DialogTitle className="text-base">Gravação Bubbles</DialogTitle>
+          <DialogTitle className="text-base">Gravação</DialogTitle>
           <a href={url} target="_blank" rel="noopener noreferrer">
             <Button variant="ghost" size="sm" className="gap-1.5">
-              <ExternalLink className="h-4 w-4" /> Abrir em Bubbles
+              <ExternalLink className="h-4 w-4" /> Abrir gravação
             </Button>
           </a>
         </DialogHeader>
@@ -39,7 +39,7 @@ export function BubblesVideoModal({ url, onClose }: Props) {
             <p className="text-sm text-slate-500">Não foi possível incorporar o vídeo diretamente.</p>
             <a href={url} target="_blank" rel="noopener noreferrer">
               <Button>
-                <ExternalLink className="h-4 w-4 mr-2" /> Abrir em Bubbles
+                <ExternalLink className="h-4 w-4 mr-2" /> Abrir gravação
               </Button>
             </a>
           </div>
