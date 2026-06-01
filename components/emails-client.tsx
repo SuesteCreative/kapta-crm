@@ -575,6 +575,31 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
     }
   }
 
+  // Auto-sync while the emails page is open. The only server-side cron is daily
+  // (vercel.json: 0 7 * * *), so without this new mail wouldn't show until the
+  // next morning or a manual click. Pedro lives on this page, so sync on mount,
+  // on focus, and every few minutes — silent, throttled via lastEmailSync.
+  const syncNowRef = useRef(syncNow)
+  syncNowRef.current = syncNow
+  useEffect(() => {
+    const THROTTLE_MS = 2 * 60 * 1000
+    const maybeSync = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      const last = Number(localStorage.getItem('lastEmailSync') ?? 0)
+      if (Date.now() - last < THROTTLE_MS) return
+      syncNowRef.current(true) // silent
+    }
+    maybeSync()
+    const id = setInterval(maybeSync, 3 * 60 * 1000)
+    window.addEventListener('focus', maybeSync)
+    document.addEventListener('visibilitychange', maybeSync)
+    return () => {
+      clearInterval(id)
+      window.removeEventListener('focus', maybeSync)
+      document.removeEventListener('visibilitychange', maybeSync)
+    }
+  }, [])
+
   // When the user is searching, the list comes from the server (whole table,
   // any age). Otherwise it's the locally-loaded page.
   const isSearching = search.trim().length >= 2
