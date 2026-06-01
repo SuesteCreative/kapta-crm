@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Search, Plug, CheckCircle2, Inbox, AlertCircle,
-  ChevronRight, Sparkles, Loader2, MailWarning, Mail, FileCheck2,
+  ChevronRight, Sparkles, Loader2, MailWarning, Mail, FileCheck2, RefreshCw,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -103,6 +103,7 @@ export function FhIntegrationsClient({
   const [statusSaving, setStatusSaving] = useState<Record<string, boolean>>({})
   const [aiSuggesting, setAiSuggesting] = useState<Record<string, boolean>>({})
   const [converting, setConverting] = useState<Record<string, boolean>>({})
+  const [syncing, setSyncing] = useState(false)
 
   const q = search.trim().toLowerCase()
 
@@ -210,6 +211,28 @@ export function FhIntegrationsClient({
     }
   }
 
+  // Re-scan stored emails for the FH form template and flag any missed ones
+  // (including ones forwarded by a team member, which the live classifier skips).
+  async function syncEmails() {
+    setSyncing(true)
+    try {
+      const res = await fetch('/api/fareharbor/sync-emails', { method: 'POST' })
+      const json = await res.json().catch(() => ({} as Record<string, unknown>))
+      if (!res.ok || !json.ok) throw new Error((json.error as string) ?? `HTTP ${res.status}`)
+      const found = (json.flagged as number) ?? 0
+      if (found > 0) {
+        toast.success(`${found} novo${found === 1 ? '' : 's'} pedido${found === 1 ? '' : 's'} encontrado${found === 1 ? '' : 's'}`)
+        router.refresh()
+      } else {
+        toast(`Sem novos pedidos · ${(json.scanned as number) ?? 0} emails verificados`)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao sincronizar emails.')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   async function changeStatus(rowId: string, next: FhIntegrationStatus) {
     setStatusSaving((s) => ({ ...s, [rowId]: true }))
     try {
@@ -282,6 +305,19 @@ export function FhIntegrationsClient({
             {totalIntegrations} {totalIntegrations === 1 ? 'parceiro ativo' : 'parceiros ativos'}
           </p>
         </div>
+        <Button
+          onClick={syncEmails}
+          disabled={syncing}
+          variant="outline"
+          size="sm"
+          className="h-9 gap-2 rounded-lg text-sm shrink-0"
+          title="Procurar pedidos de integração nos emails (inclui reencaminhados)"
+        >
+          {syncing
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : <RefreshCw className="h-4 w-4" />}
+          Sincronizar emails
+        </Button>
       </div>
 
       {/* Filters */}
