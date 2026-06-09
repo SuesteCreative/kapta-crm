@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { RecipientPicker, type Recipient } from '@/components/recipient-picker'
 import { uploadAttachment, type UploadedAttachment, MAX_ATTACHMENT_BYTES } from '@/lib/upload-attachment'
+import { compressImage } from '@/lib/compress-image'
 import { readTextStream, extractJsonFields } from '@/lib/ai/streaming'
 
 interface PromptPreset {
@@ -324,7 +325,8 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
     }
     setUploadingImage(true)
     try {
-      const att = await uploadAttachment(file)
+      const compressed = await compressImage(file)
+      const att = await uploadAttachment(compressed)
       setInlineImages((prev) => [...prev, att])
       insertAtCursor(`[img:${att.url}]`)
       toast.success('Imagem inserida no corpo.')
