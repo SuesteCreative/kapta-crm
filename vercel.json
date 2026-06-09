@@ -3,6 +3,10 @@
     {
       "path": "/api/imap/sync-dispatch",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/keep-alive",
+      "schedule": "0 19 * * *"
     }
   ],
   "functions": {
