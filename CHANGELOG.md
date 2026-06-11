@@ -2,6 +2,17 @@
 
 ---
 
+## [Unreleased] — Junho 2026
+
+### Incidente 2026-06-11 — Disk IO budget esgotado (DB em baixo)
+- **Causa raiz:** o auto-fix de encoding legado corria em TODOS os syncs com `ilike '%=C3=%'` — sem índice possível → full table scan + detoast de todos os corpos de email a cada 2-3 min (auto-sync). Esgotou o disk IO budget do free tier → DB throttled → CRM "não carregava"
+- Removido o auto-fix legado do sync (migração one-time de Abril, há muito concluída); `legacy_fixed` mantém-se na resposta como 0
+- Cadência do auto-sync na página de emails: sync 2 min → 15 min, refresh da lista 1 min → 5 min, intervalo do timer 3 min → 5 min; botão "Sincronizar" continua a dar sync imediato
+- Fix: `/api/keep-alive` adicionado ao whitelist do proxy — o cron diário era redirecionado para /login e o heartbeat nunca chegava à DB
+- JobToaster: canal realtime re-subscreve quando morre silenciosamente (sleep do portátil, mudança de rede)
+
+---
+
 ## [Unreleased] — Abril 2026
 
 ### Renderização de HTML nos Emails (Tabelas, Listas, Links)

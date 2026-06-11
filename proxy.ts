@@ -16,6 +16,10 @@ const PUBLIC_PATHS = [
   '/api/imap/sync',
   '/api/imap/sync-customer',
   '/api/imap/reparse',
+  // Supabase keep-alive heartbeat. Guards itself via requireAuth (Vercel cron
+  // header / CRON_SECRET). Without this entry the daily cron was 307'd to
+  // /login and the heartbeat never reached the DB.
+  '/api/keep-alive',
 ]
 
 export function proxy(request: NextRequest) {

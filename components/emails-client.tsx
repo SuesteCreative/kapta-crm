@@ -582,15 +582,31 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
   const syncNowRef = useRef(syncNow)
   syncNowRef.current = syncNow
   useEffect(() => {
-    const THROTTLE_MS = 2 * 60 * 1000
+    // Cadence matters: the 3-minute auto-sync (plus a per-sync full-table
+    // scan, since removed) exhausted the Supabase free-tier disk IO budget on
+    // 2026-06-11 and took the DB down. 15 min keeps the inbox fresh enough;
+    // the manual "Sincronizar" button covers the "I want it now" case.
+    const THROTTLE_MS = 15 * 60 * 1000
+    const REFRESH_THROTTLE_MS = 5 * 60 * 1000
+    // The list normally refreshes via <JobToaster /> when a sync job
+    // completes, but that depends on the Supabase realtime websocket, which
+    // can die silently (laptop sleep, network change). Refresh the server
+    // snapshot on the same cadence as the auto-sync so the list never goes
+    // stale even with a dead channel. Starts at "now" to skip the redundant
+    // refresh on mount — the page just rendered fresh data.
+    let lastRefresh = Date.now()
     const maybeSync = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      if (Date.now() - lastRefresh >= REFRESH_THROTTLE_MS) {
+        lastRefresh = Date.now()
+        router.refresh()
+      }
       const last = Number(localStorage.getItem('lastEmailSync') ?? 0)
       if (Date.now() - last < THROTTLE_MS) return
       syncNowRef.current(true) // silent
     }
     maybeSync()
-    const id = setInterval(maybeSync, 3 * 60 * 1000)
+    const id = setInterval(maybeSync, 5 * 60 * 1000)
     window.addEventListener('focus', maybeSync)
     document.addEventListener('visibilitychange', maybeSync)
     return () => {
@@ -598,7 +614,7 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
       window.removeEventListener('focus', maybeSync)
       document.removeEventListener('visibilitychange', maybeSync)
     }
-  }, [])
+  }, [router])
 
   // When the user is searching, the list comes from the server (whole table,
   // any age). Otherwise it's the locally-loaded page.
@@ -1346,6 +1362,7 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
           interactions={replyCtx.interactions}
           allEmails={replyCtx.allEmails}
           initialSubject={replyCtx.initialSubject}
+          onSent={() => router.refresh()}
           onClose={() => setReplyOpen(false)}
         />
       )}

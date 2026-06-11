@@ -12,7 +12,6 @@ import { ImapFlow } from 'imapflow'
 import { simpleParser, ParsedMail } from 'mailparser'
 import { createServiceClient } from '@/lib/supabase'
 import { analyzeAttachment } from '@/lib/analyze-attachment'
-import { decodeLegacyEmailContent, looksLikeLegacyEmail } from '@/lib/decode-legacy-email'
 import {
   isFhIntegrationEmail, isFhIntegrationBody, parseFhIntegrationEmail,
   isFhConfirmationEmail, isFhConfirmationBody, parseFhConfirmationEmail,
@@ -381,39 +380,16 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
   let skipped = 0
   let unknown = 0
   let created = 0
-  let legacyFixed = 0
+  const legacyFixed = 0
   let hasMore = false
 
-  // Legacy auto-fix — only on the first chunk (when fromUid isn't set we
-  // assume this is the start of a sync). Cheap if nothing matches the
-  // ilike filter, so we just always run it.
-  try {
-    const { data: legacyRows } = await supabase
-      .from('interactions')
-      .select('id, content')
-      .eq('type', 'email')
-      .not('content', 'is', null)
-      .ilike('content', '%=C3=%')
-      .limit(500)
-
-    const updates: Array<{ id: string; content: string }> = []
-    for (const r of legacyRows ?? []) {
-      if (!r.content || !looksLikeLegacyEmail(r.content)) continue
-      const decoded = decodeLegacyEmailContent(r.content)
-      if (decoded && decoded !== r.content) updates.push({ id: r.id, content: decoded })
-    }
-    for (let i = 0; i < updates.length; i += 20) {
-      const chunk = updates.slice(i, i + 20)
-      await Promise.all(
-        chunk.map((u) =>
-          supabase.from('interactions').update({ content: u.content }).eq('id', u.id)
-        )
-      )
-      legacyFixed += chunk.length
-    }
-  } catch (err) {
-    console.error('Legacy auto-fix failed (non-blocking):', err)
-  }
+  // Legacy encoding auto-fix removed (2026-06-11). It was a one-time April
+  // migration, but the `ilike('content', '%=C3=%')` filter can't use an index,
+  // so every sync seq-scanned and detoasted the entire interactions table.
+  // Combined with the 3-minute auto-sync it exhausted the Supabase free-tier
+  // disk IO budget and took the whole DB down. All legacy rows were fixed
+  // months ago; new mail is parsed correctly at ingest (mailparser-1).
+  // `legacy_fixed` stays in the response shape as 0 for API compatibility.
 
   type NewInteraction = {
     customer_id: string

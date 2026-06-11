@@ -160,33 +160,59 @@ export function JobToaster() {
       )
     }
 
-    const channel = supabase
-      .channel('job_status_watch')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'job_status' },
-        (payload) => {
-          const row = payload.new as JobRow
-          if (row.kind !== 'imap_sync') return
-          if (row.status === 'running') showProgress(row)
-          else if (row.status === 'done') showDone(row)
-          else if (row.status === 'failed') showFailed(row)
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'job_status' },
-        (payload) => {
-          const row = payload.new as JobRow
-          if (row.kind !== 'imap_sync') return
-          if (row.status === 'running') showProgress(row)
-          else if (row.status === 'done') showDone(row)
-          else if (row.status === 'failed') showFailed(row)
-        },
-      )
-      .subscribe()
+    const onChange = (payload: { new: unknown }) => {
+      const row = payload.new as JobRow
+      if (row.kind !== 'imap_sync') return
+      if (row.status === 'running') showProgress(row)
+      else if (row.status === 'done') showDone(row)
+      else if (row.status === 'failed') showFailed(row)
+    }
 
-    return () => { supabase.removeChannel(channel) }
+    // The realtime websocket can die silently (laptop sleep, network change)
+    // and a dead channel means no progress toasts and no router.refresh()
+    // when syncs land — the page looks frozen while the DB keeps filling.
+    // Self-heal: retry on channel error, and re-subscribe when the tab
+    // regains focus with a non-joined channel.
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let disposed = false
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+    function subscribe() {
+      if (disposed) return
+      if (channel) supabase.removeChannel(channel)
+      const ch = supabase
+        .channel('job_status_watch')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_status' }, onChange)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'job_status' }, onChange)
+      channel = ch
+      ch.subscribe((status) => {
+        // Stale callback from a channel we already replaced — removing it
+        // fires CLOSED, which must not schedule another resubscribe loop.
+        if (disposed || channel !== ch) return
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          if (retryTimer) clearTimeout(retryTimer)
+          retryTimer = setTimeout(subscribe, 5_000)
+        }
+      })
+    }
+
+    subscribe()
+
+    const resubscribeIfDead = () => {
+      if (document.visibilityState !== 'visible') return
+      const state = channel?.state
+      if (state !== 'joined' && state !== 'joining') subscribe()
+    }
+    window.addEventListener('focus', resubscribeIfDead)
+    document.addEventListener('visibilitychange', resubscribeIfDead)
+
+    return () => {
+      disposed = true
+      if (retryTimer) clearTimeout(retryTimer)
+      window.removeEventListener('focus', resubscribeIfDead)
+      document.removeEventListener('visibilitychange', resubscribeIfDead)
+      if (channel) supabase.removeChannel(channel)
+    }
   }, [router, queryClient])
 
   return null
