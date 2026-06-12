@@ -16,6 +16,10 @@ const PUBLIC_PATHS = [
   '/api/imap/sync',
   '/api/imap/sync-customer',
   '/api/imap/reparse',
+  // The 07:00 daily cron targets this route (vercel.json). It guards itself
+  // via requireAuth; without this entry the cron was 307'd to /login and the
+  // daily backstop sync never ran (only client-side auto-syncs worked).
+  '/api/imap/sync-dispatch',
   // Supabase keep-alive heartbeat. Guards itself via requireAuth (Vercel cron
   // header / CRON_SECRET). Without this entry the daily cron was 307'd to
   // /login and the heartbeat never reached the DB.
