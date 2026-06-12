@@ -20,6 +20,9 @@ const PUBLIC_PATHS = [
   // header / CRON_SECRET). Without this entry the daily cron was 307'd to
   // /login and the heartbeat never reached the DB.
   '/api/keep-alive',
+  // Data-freshness probe for UptimeRobot — public by design, leaks only a
+  // timestamp. External monitoring is the last line against silent failures.
+  '/api/health/email-freshness',
 ]
 
 export function proxy(request: NextRequest) {

@@ -1,3 +1,4 @@
+import { NonRetriableError } from 'inngest'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase'
 import { runImapSync, countPendingCandidates } from '@/lib/imap/sync-core'
@@ -21,6 +22,34 @@ export const imapSync = inngest.createFunction(
     name: 'IMAP sync',
     triggers: [{ event: 'imap/sync.requested' }],
     concurrency: { limit: 1 },
+    // A failed sync is superseded by the next auto-sync ≤15 min later, so one
+    // retry is plenty. timeouts.start expires runs that sit queued behind the
+    // concurrency:1 slot instead of letting an outage build a FIFO backlog
+    // that starves every later manual sync (the 2026-06-11..12 incident).
+    retries: 1,
+    timeouts: { start: '10m' },
+    // Last-resort truth: if the run dies in any way that skips mark-failed
+    // (throw inside ensure-job-row, lost continuation, retries exhausted),
+    // stamp the job row failed so the UI never shows a forever-spinner.
+    onFailure: async ({ event, error }) => {
+      const supabase = createServiceClient()
+      const original = event.data.event as { data?: { jobId?: string } } | undefined
+      const jobId = original?.data?.jobId
+      const update = {
+        status: 'failed',
+        message: `Sync falhou: ${error.message}`.slice(0, 500),
+        completed_at: new Date().toISOString(),
+      }
+      if (jobId) {
+        await supabase.from('job_status').update(update).eq('id', jobId)
+      } else {
+        await supabase
+          .from('job_status')
+          .update(update)
+          .eq('kind', 'imap_sync')
+          .eq('status', 'running')
+      }
+    },
   },
   async ({ event, step, logger }) => {
     const trigger = event.data.trigger as 'cron' | 'manual' | 'continue'
@@ -30,7 +59,7 @@ export const imapSync = inngest.createFunction(
     // Reuse an existing job_status row across the continuation chain.
     // On the first invocation (no incoming jobId), pre-count pending
     // candidates so the UI progress bar can render percentage.
-    const { jobId, total } = await step.run('ensure-job-row', async () => {
+    const { jobId, total, countError } = await step.run('ensure-job-row', async () => {
       if (incomingJobId) {
         const { data } = await supabase
           .from('job_status')
@@ -38,8 +67,22 @@ export const imapSync = inngest.createFunction(
           .eq('id', incomingJobId)
           .maybeSingle()
         const meta = (data?.metadata as Record<string, unknown> | null) ?? {}
-        return { jobId: incomingJobId, total: (meta.total as number) ?? 0 }
+        return { jobId: incomingJobId, total: (meta.total as number) ?? 0, countError: null as string | null }
       }
+
+      // Sweep rows stranded in 'running' by a dead continuation chain. Done
+      // here (not a cron) so it runs exactly when a stale row could confuse
+      // the dispatch backpressure check or pin a forever-spinner in the UI.
+      await supabase
+        .from('job_status')
+        .update({
+          status: 'failed',
+          message: 'Expirado: sync anterior nunca terminou',
+          completed_at: new Date().toISOString(),
+        })
+        .eq('kind', 'imap_sync')
+        .eq('status', 'running')
+        .lt('started_at', new Date(Date.now() - 15 * 60 * 1000).toISOString())
 
       const counted = await countPendingCandidates()
       const { data, error } = await supabase
@@ -47,7 +90,9 @@ export const imapSync = inngest.createFunction(
         .insert({
           kind: 'imap_sync',
           status: 'running',
-          message: counted.total > 0 ? `0 / ${counted.total}` : 'Sem novos emails',
+          message: counted.error
+            ? `IMAP: ${counted.error}`.slice(0, 500)
+            : counted.total > 0 ? `0 / ${counted.total}` : 'Sem novos emails',
           metadata: {
             trigger,
             total: counted.total,
@@ -61,8 +106,25 @@ export const imapSync = inngest.createFunction(
         .select('id')
         .single()
       if (error) throw new Error(`job_status insert failed: ${error.message}`)
-      return { jobId: data.id as string, total: counted.total }
+      return { jobId: data.id as string, total: counted.total, countError: counted.error ?? null }
     })
+
+    // A failed candidate count used to masquerade as "Sem novos emails" (the
+    // .error field was never read) — an IMAP outage or IP ban looked exactly
+    // like a quiet inbox. Fail loudly instead; the JobToaster shows the row.
+    if (countError) {
+      await step.run('mark-count-failed', async () => {
+        await supabase
+          .from('job_status')
+          .update({
+            status: 'failed',
+            message: `IMAP: ${countError}`.slice(0, 500),
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', jobId)
+      })
+      throw new NonRetriableError(`countPendingCandidates failed: ${countError}`)
+    }
 
     // No new emails — short-circuit so the user gets immediate feedback.
     if (total === 0 && !incomingJobId) {
@@ -75,6 +137,10 @@ export const imapSync = inngest.createFunction(
             completed_at: new Date().toISOString(),
           })
           .eq('id', jobId)
+        // An empty inbox is still a healthy sync — keep the dead-man switch fed.
+        if (process.env.HEALTHCHECK_SYNC_URL) {
+          await fetch(process.env.HEALTHCHECK_SYNC_URL).catch(() => {})
+        }
       })
       return { jobId, hasMore: false, totals: { total: 0, synced: 0, created: 0, skipped: 0 } }
     }
@@ -151,6 +217,14 @@ export const imapSync = inngest.createFunction(
           completed_at: new Date().toISOString(),
         })
         .eq('id', jobId)
+
+      // Dead-man switch: healthchecks.io alerts Pedro if no successful sync
+      // pings within the configured period+grace. Pinged only on a genuinely
+      // completed run, so every silent-failure mode trips the alarm. No-op
+      // until HEALTHCHECK_SYNC_URL is set in Vercel.
+      if (process.env.HEALTHCHECK_SYNC_URL) {
+        await fetch(process.env.HEALTHCHECK_SYNC_URL).catch(() => {})
+      }
     })
 
     return { jobId, hasMore: false, totals }

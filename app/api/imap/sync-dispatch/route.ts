@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { requireAuth } from '@/lib/api-auth'
 import { inngest } from '@/lib/inngest/client'
+import { createServiceClient } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,16 +16,42 @@ export const dynamic = 'force-dynamic'
  * blocking the user's next navigation. Dispatching to Inngest decouples
  * the work from the request lifecycle and gives us retries on failure.
  */
-export async function POST(req: NextRequest) {
-  const denied = requireAuth(req)
-  if (denied) return denied
+
+/**
+ * Backpressure: with the sidebar button, the emails-page auto-sync, focus
+ * listeners and the daily cron all able to dispatch, a slow run used to
+ * collect a pile of queued events behind the function's concurrency:1 slot
+ * (the 2026-06-11..12 backlog). If a sync started <10 min ago is still
+ * running, skip the dispatch — the active run already covers this request.
+ * The 10-min cutoff plus the stale-row sweeper in the Inngest function
+ * keeps a stranded 'running' row from deadlocking dispatch forever.
+ */
+async function dispatch(trigger: 'manual' | 'cron') {
+  const supabase = createServiceClient()
+  const { data: active } = await supabase
+    .from('job_status')
+    .select('id, started_at')
+    .eq('kind', 'imap_sync')
+    .eq('status', 'running')
+    .gte('started_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+    .limit(1)
+    .maybeSingle()
+
+  if (active) {
+    return NextResponse.json({ ok: true, dispatched: false, alreadyRunning: true, jobId: active.id })
+  }
 
   await inngest.send({
     name: 'imap/sync.requested',
-    data: { trigger: 'manual' },
+    data: { trigger },
   })
+  return NextResponse.json({ ok: true, dispatched: true, trigger })
+}
 
-  return NextResponse.json({ ok: true, dispatched: true })
+export async function POST(req: NextRequest) {
+  const denied = requireAuth(req)
+  if (denied) return denied
+  return dispatch('manual')
 }
 
 /**
@@ -36,11 +63,5 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const denied = requireAuth(req)
   if (denied) return denied
-
-  await inngest.send({
-    name: 'imap/sync.requested',
-    data: { trigger: 'cron' },
-  })
-
-  return NextResponse.json({ ok: true, dispatched: true, trigger: 'cron' })
+  return dispatch('cron')
 }

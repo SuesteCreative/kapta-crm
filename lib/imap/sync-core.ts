@@ -118,6 +118,7 @@ export type SyncResult = {
   skipped_duplicate: number
   skipped_unknown_outbound: number
   legacy_fixed: number
+  attachment_failures: number
   hasMore: boolean
   message: string
 } | {
@@ -160,9 +161,15 @@ export async function countPendingCandidates(): Promise<{
     .limit(1)
     .single()
 
-  const syncSince = latestEmail?.occurred_at
+  // One future-dated Date: header (spam does this) would push the watermark
+  // past "now" and make every subsequent sync find nothing, forever, while
+  // reporting "Sem novos emails". Clamp it.
+  let syncSince = latestEmail?.occurred_at
     ? new Date(new Date(latestEmail.occurred_at).getTime() - 24 * 60 * 60 * 1000)
     : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+  if (syncSince.getTime() > Date.now()) {
+    syncSince = new Date(Date.now() - 24 * 60 * 60 * 1000)
+  }
 
   const dedupSince = new Date(syncSince.getTime() - 2 * 24 * 60 * 60 * 1000)
   const { data: existingRows } = await supabase
@@ -203,8 +210,27 @@ export async function countPendingCandidates(): Promise<{
       let lock
       try { lock = await client.getMailboxLock(path) } catch { continue }
       try {
-        const searchResult = await client.search({ since: syncSince }, { uid: true })
-        const allUids = searchResult === false ? [] : searchResult
+        // Mirror runImapSync's UID-cursor fast path (read-only here) so the
+        // count doesn't re-fetch envelopes of mail already decided on.
+        const boxValidity = String(client.mailbox && typeof client.mailbox === 'object'
+          ? client.mailbox.uidValidity ?? ''
+          : '')
+        const { data: cursor } = await supabase
+          .from('imap_cursors')
+          .select('uidvalidity, last_uid')
+          .eq('mailbox', path)
+          .maybeSingle()
+        const cursorValid = !!cursor && boxValidity !== '' && String(cursor.uidvalidity) === boxValidity
+
+        let allUids: number[]
+        if (cursorValid) {
+          const lastUid = Number(cursor.last_uid)
+          const r = await client.search({ uid: `${lastUid + 1}:*` }, { uid: true })
+          allUids = (r === false ? [] : r).filter((u) => u > lastUid)
+        } else {
+          const r = await client.search({ since: syncSince }, { uid: true })
+          allUids = r === false ? [] : r
+        }
         if (allUids.length === 0) continue
 
         for await (const msg of client.fetch([...allUids].reverse().slice(0, 2000), {
@@ -351,9 +377,13 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
     .limit(1)
     .single()
 
-  const syncSince = latestEmail?.occurred_at
+  // Same future-date clamp as countPendingCandidates — see comment there.
+  let syncSince = latestEmail?.occurred_at
     ? new Date(new Date(latestEmail.occurred_at).getTime() - 24 * 60 * 60 * 1000)
     : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+  if (syncSince.getTime() > Date.now()) {
+    syncSince = new Date(Date.now() - 24 * 60 * 60 * 1000)
+  }
 
   const dedupSince = new Date(syncSince.getTime() - 2 * 24 * 60 * 60 * 1000)
   const { data: existingRows } = await supabase
@@ -380,6 +410,7 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
   let skipped = 0
   let unknown = 0
   let created = 0
+  let attachmentFailures = 0
   const legacyFixed = 0
   let hasMore = false
 
@@ -421,8 +452,29 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
         .upsert(stripped, { onConflict: 'source_id', ignoreDuplicates: true })
       error = retry.error
     }
-    if (!error) synced += chunk.length
-    else console.error('[imap/sync] insert error:', error.message)
+    if (!error) {
+      synced += chunk.length
+      return
+    }
+    // A swallowed insert error used to discard the parsed emails from memory
+    // and let the job finish "done" with nothing written. Throw instead: the
+    // outer catch converts this to { ok: false } and the job is marked failed,
+    // and because the upsert dedups on source_id the retry cannot duplicate.
+    throw new Error(`interactions upsert failed (${chunk.length} emails lost this attempt): ${error.message}`)
+  }
+
+  // Persist the per-mailbox UID cursor. Called only once everything up to
+  // maxUid is either flushed to the DB or deliberately skipped — never after
+  // a partial chunk, so a crashed run simply redoes work (upsert dedups).
+  // Errors ignored: a missing imap_cursors table just means date-search next run.
+  async function advanceCursor(mailbox: string, uidvalidity: string, maxUid: number) {
+    if (!uidvalidity || maxUid <= 0) return
+    await supabase
+      .from('imap_cursors')
+      .upsert(
+        { mailbox, uidvalidity, last_uid: maxUid, updated_at: new Date().toISOString() },
+        { onConflict: 'mailbox' },
+      )
   }
 
   try {
@@ -458,8 +510,34 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
       }
 
       try {
-        const searchResult = await client.search({ since: syncSince }, { uid: true })
-        const allUids = searchResult === false ? [] : searchResult
+        // RFC 4549 incremental sync: a per-mailbox (uidvalidity, last_uid)
+        // cursor replaces the date-based SEARCH SINCE. UIDs are monotonic and
+        // immune to clocks, timezones and forged Date: headers, and we stop
+        // re-fetching envelopes of mail we already decided to skip (spam,
+        // unknown senders) on every single run. The date search remains as
+        // the backfill path: first run, UIDVALIDITY change (mailbox rebuilt),
+        // or missing cursor table (migration not applied — degrades cleanly).
+        const boxValidity = String(client.mailbox && typeof client.mailbox === 'object'
+          ? client.mailbox.uidValidity ?? ''
+          : '')
+        const { data: cursor } = await supabase
+          .from('imap_cursors')
+          .select('uidvalidity, last_uid')
+          .eq('mailbox', path)
+          .maybeSingle()
+        const cursorValid = !!cursor && boxValidity !== '' && String(cursor.uidvalidity) === boxValidity
+
+        let allUids: number[]
+        if (cursorValid) {
+          const lastUid = Number(cursor.last_uid)
+          const r = await client.search({ uid: `${lastUid + 1}:*` }, { uid: true })
+          // IMAP quirk: "n:*" returns the highest-UID message even when n is
+          // past the end of the mailbox — filter so "nothing new" is [].
+          allUids = (r === false ? [] : r).filter((u) => u > lastUid)
+        } else {
+          const r = await client.search({ since: syncSince }, { uid: true })
+          allUids = r === false ? [] : r
+        }
         if (allUids.length === 0) continue
 
         const candidateUids: number[] = []
@@ -475,7 +553,14 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
           candidateUids.push(msg.uid)
         }
 
-        if (candidateUids.length === 0) continue
+        const maxSeenUid = allUids.reduce((m, u) => (u > m ? u : m), 0)
+
+        if (candidateUids.length === 0) {
+          // Everything listed was already in the DB or unusable — remember
+          // that so we stop re-fetching these envelopes on every run.
+          await advanceCursor(path, boxValidity, maxSeenUid)
+          continue
+        }
 
         // Chunking: cap how many candidates we fetch bodies for this run.
         const remaining = Math.max(0, maxEmails - processedThisRun)
@@ -751,7 +836,18 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
 
           const subject = parsed.subject ?? null
           const rawDate = msg.internalDate ?? parsed.date ?? new Date()
-          const date    = rawDate instanceof Date ? rawDate : new Date(rawDate)
+          let date      = rawDate instanceof Date ? rawDate : new Date(rawDate)
+          // Forged/misconfigured Date: headers must never land in the future —
+          // they'd poison the max(occurred_at) watermark and freeze the sync.
+          // internalDate is the server's receive time and is normally sane;
+          // clamp to now+5min to also survive a skewed mail server clock.
+          const maxSane = Date.now() + 5 * 60 * 1000
+          if (isNaN(date.getTime()) || date.getTime() > maxSane) {
+            const internal = msg.internalDate ? new Date(msg.internalDate) : null
+            date = internal && !isNaN(internal.getTime()) && internal.getTime() <= maxSane
+              ? internal
+              : new Date()
+          }
 
           const fromForFh = fromList[0]?.address ?? primarySenderEmail
           // Direct from site@kapta.pt OR forwarded by a team member (body match).
@@ -894,7 +990,11 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
                 const { error: upErr } = await supabase.storage
                   .from(ATTACH_BUCKET)
                   .upload(fileName, att.content, { contentType: att.mime, upsert: false })
-                if (upErr) continue
+                if (upErr) {
+                  attachmentFailures++
+                  console.error('[imap/sync] attachment upload failed:', att.name, upErr.message)
+                  continue
+                }
 
                 const { data: { publicUrl } } = supabase.storage.from(ATTACH_BUCKET).getPublicUrl(fileName)
 
@@ -904,6 +1004,7 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
 
                 attachments.push({ name: att.name, mime: att.mime, size: att.size, url: publicUrl, ai_summary })
               } catch (err) {
+                attachmentFailures++
                 console.error('Attachment upload error:', att.name, err)
               }
             }
@@ -915,12 +1016,23 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
                 .eq('source_id', work.sourceId)
                 .maybeSingle()
               const prev = (existing?.metadata as Record<string, unknown> | null) ?? {}
-              await supabase
+              const { error: metaErr } = await supabase
                 .from('interactions')
                 .update({ metadata: { ...prev, matched_email: work.matchedEmail, attachments, parsed_version: 'mailparser-1' } })
                 .eq('source_id', work.sourceId)
+              if (metaErr) {
+                attachmentFailures++
+                console.error('[imap/sync] attachment metadata update failed:', work.sourceId, metaErr.message)
+              }
             }
           }
+        }
+
+        // Box fully drained this run (no chunk cap hit) — advance the cursor
+        // past everything we saw. Skipped here when hasMore: the continuation
+        // run re-lists the remainder and dedups, then advances.
+        if (!hasMore) {
+          await advanceCursor(path, boxValidity, maxSeenUid)
         }
       } finally {
         lock.release()
@@ -938,8 +1050,9 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
       skipped_duplicate: skipped,
       skipped_unknown_outbound: unknown,
       legacy_fixed: legacyFixed,
+      attachment_failures: attachmentFailures,
       hasMore,
-      message: `${synced} imported, ${created} new leads, ${skipped} duplicates, ${unknown} unknown outbound, ${legacyFixed} legacy decoded${hasMore ? ' — more remaining' : ''}`,
+      message: `${synced} imported, ${created} new leads, ${skipped} duplicates, ${unknown} unknown outbound${attachmentFailures > 0 ? `, ${attachmentFailures} attachment failures` : ''}${hasMore ? ' — more remaining' : ''}`,
     }
   } catch (error) {
     const host = process.env.IMAP_HOST ?? '(not set)'
