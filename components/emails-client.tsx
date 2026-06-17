@@ -261,6 +261,7 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
   const [selectedContent, setSelectedContent] = useState<string | null>(null)
   const [selectedHtml, setSelectedHtml]       = useState<string | null>(null)
   const [contentLoading, setContentLoading]   = useState(false)
+  const [contentError, setContentError]       = useState(false)
   const [drafts, setDrafts]             = useState<DraftRow[]>([])
   const [draftsOpen, setDraftsOpen]     = useState(false)
   const draftsRef                       = useRef<HTMLDivElement>(null)
@@ -433,12 +434,10 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
   async function openForward(email: EmailRow) {
     let content: string | null = selectedContent
     if (!content || email.id !== selectedId) {
-      const { data } = await supabase
-        .from('interactions')
-        .select('content')
-        .eq('id', email.id)
-        .maybeSingle()
-      content = (data?.content as string | null) ?? null
+      const json = await fetch(`/api/emails/${email.id}/body`)
+        .then((r) => r.json())
+        .catch(() => null)
+      content = (json?.ok ? (json.content as string | null) : null) ?? null
     }
     setComposeDraftId(null)
     setComposeInitial(buildForwardState(email, content))
@@ -446,27 +445,33 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
   }
 
   // Lazy-fetch full body + html when an email is selected; also mark as read.
+  // Body is read via a server route (service role) because `interactions` has
+  // RLS enabled with no policy — a direct browser query returns zero rows and
+  // would silently render every email as "(sem corpo)".
   useEffect(() => {
     if (!selectedId) {
       setSelectedContent(null)
       setSelectedHtml(null)
+      setContentError(false)
       return
     }
     let cancelled = false
     setContentLoading(true)
+    setContentError(false)
     setSelectedContent(null)
     setSelectedHtml(null)
-    supabase
-      .from('interactions')
-      .select('content, metadata')
-      .eq('id', selectedId)
-      .maybeSingle()
-      .then(({ data }) => {
+    fetch(`/api/emails/${selectedId}/body`)
+      .then(async (r) => {
         if (cancelled) return
-        const meta = data?.metadata as Record<string, unknown> | null
-        setSelectedContent((data?.content as string | null) ?? null)
-        setSelectedHtml((meta?.html as string | null | undefined) ?? null)
+        const json = await r.json().catch(() => null)
+        if (!r.ok || !json?.ok) {
+          setContentError(true)
+          return
+        }
+        setSelectedContent((json.content as string | null) ?? null)
+        setSelectedHtml((json.html as string | null) ?? null)
       })
+      .catch(() => { if (!cancelled) setContentError(true) })
       .then(() => { if (!cancelled) setContentLoading(false) })
 
     // Mark as read on selection (idempotent + optimistic)
@@ -1344,6 +1349,8 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
                 <div className="px-5 py-4 overflow-auto flex-1">
                   {contentLoading
                     ? <div className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>A carregar mensagem…</div>
+                    : contentError
+                    ? <div className="text-[12px]" style={{ color: 'var(--destructive, #dc2626)' }}>Falha ao carregar a mensagem. Recarrega ou tenta de novo.</div>
                     : <EmailHtmlViewer html={htmlBody} text={body} />}
                 </div>
               </div>
