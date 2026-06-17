@@ -63,13 +63,23 @@ export async function POST(req: NextRequest) {
     if (data?.session) {
       accessToken  = data.session.access_token
       refreshToken = data.session.refresh_token
+    } else if (error) {
+      // Surface — do NOT swallow. A failed Supabase sign-in means the browser
+      // stays on the anon role and EVERY client-side DB read/write is silently
+      // RLS-blocked app-wide. This degraded silently for ~2 months when the
+      // legacy anon key was disabled. Loud logs make the next break obvious.
+      console.error('[login] Supabase sign-in failed — browser will lack a JWT (RLS will block all client queries):', error.message)
     }
-  } catch {
-    // Supabase Auth unavailable — continue with cookie-only auth.
-    // Browser-direct DB queries will fail until session is restored on next login.
+  } catch (e) {
+    console.error('[login] Supabase Auth threw — continuing with cookie-only auth (client DB queries will fail):', e)
   }
 
-  const res = NextResponse.json({ ok: true, access_token: accessToken, refresh_token: refreshToken })
+  const res = NextResponse.json({
+    ok: true,
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    supabase_session: !!(accessToken && refreshToken),
+  })
   res.cookies.set('kapta_session', sessionToken, {
     httpOnly: true,
     sameSite: 'lax',

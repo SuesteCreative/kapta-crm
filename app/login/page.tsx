@@ -29,6 +29,11 @@ export default function LoginPage() {
             refresh_token: data.refresh_token,
           })
         }
+        if (!data.supabase_session) {
+          // No Supabase JWT → browser is on the anon role → client DB reads/writes
+          // will be RLS-blocked. Make it visible instead of entering a broken app.
+          console.warn('[login] No Supabase session — client-side data will not load/save')
+        }
         router.push('/')
         router.refresh()
       } else {
