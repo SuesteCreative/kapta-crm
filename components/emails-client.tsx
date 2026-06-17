@@ -479,8 +479,7 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
     if (target && !target.is_read && !readIds.has(selectedId) && !unreadIds.has(selectedId)) {
       const idToMark = selectedId
       setReadIds((prev) => new Set([...prev, idToMark]))
-      supabase.from('interactions').update({ is_read: true }).eq('id', idToMark)
-        .then(({ error }) => { if (error) console.error('mark-read failed', error) })
+      setReadState(idToMark, true).catch((e) => console.error('mark-read failed', e))
     }
     return () => { cancelled = true }
   }, [selectedId])
@@ -492,6 +491,16 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
     return e.is_read
   }
 
+  // Persist read state via server route — `interactions` RLS blocks the
+  // browser's anon role, so a direct update silently no-op'd.
+  function setReadState(id: string, isRead: boolean) {
+    return fetch(`/api/emails/${id}/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_read: isRead }),
+    })
+  }
+
   async function toggleUnread(id: string, ev: ReactMouseEvent) {
     ev.stopPropagation()
     const email = [...emails, ...(serverResults ?? [])].find((e) => e.id === id)
@@ -500,11 +509,11 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
     if (currentlyRead) {
       setReadIds((prev) => { const n = new Set(prev); n.delete(id); return n })
       setUnreadIds((prev) => new Set([...prev, id]))
-      await supabase.from('interactions').update({ is_read: false }).eq('id', id)
+      await setReadState(id, false)
     } else {
       setUnreadIds((prev) => { const n = new Set(prev); n.delete(id); return n })
       setReadIds((prev) => new Set([...prev, id]))
-      await supabase.from('interactions').update({ is_read: true }).eq('id', id)
+      await setReadState(id, true)
     }
   }
 
@@ -524,12 +533,10 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
 
     setReplyLoading(true)
     try {
-      const { data: interactions } = await supabase
-        .from('interactions')
-        .select('*')
-        .eq('customer_id', email.customer_id)
-        .order('occurred_at', { ascending: false })
-        .limit(20)
+      const histJson = await fetch(`/api/emails/history?customerId=${email.customer_id}`)
+        .then((r) => r.json())
+        .catch(() => null)
+      const interactions = histJson?.ok ? (histJson.interactions as Interaction[]) : []
 
       setReplyCtx({
         customerId: email.customer_id,
@@ -537,7 +544,7 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
         customerCompany: email.customers?.company ?? null,
         customerEmail,
         initialSubject,
-        interactions: (interactions ?? []) as Interaction[],
+        interactions,
         allEmails: emailIds.map((i) => ({ label: i.value, email: i.value })),
       })
       setReplyOpen(true)
@@ -546,12 +553,11 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
     }
   }
 
-  async function dismissEmail(id: string, currentMetadata: Record<string, unknown> | null) {
+  async function dismissEmail(id: string) {
     setDismissedIds((prev) => new Set([...prev, id]))
     if (selectedId === id) setSelectedId(null)
-    await supabase.from('interactions')
-      .update({ metadata: { ...(currentMetadata ?? {}), is_spam: true } })
-      .eq('id', id)
+    await fetch(`/api/emails/${id}/dismiss`, { method: 'POST' })
+      .catch((e) => console.error('dismiss failed', e))
   }
 
   async function syncNow(silent = false) {
@@ -1084,7 +1090,7 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
                       : <Mail     className="h-3.5 w-3.5" style={{ color: 'var(--muted-foreground)' }} />}
                   </button>
                   <button
-                    onClick={(ev) => { ev.stopPropagation(); dismissEmail(email.id, email.metadata) }}
+                    onClick={(ev) => { ev.stopPropagation(); dismissEmail(email.id) }}
                     className="rounded p-1 hover:bg-[var(--border)]"
                     title="Arquivar email"
                   >

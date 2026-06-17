@@ -9,7 +9,6 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sparkles, Loader2, ChevronDown, ChevronUp, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { supabase } from '@/lib/supabase'
 import type { Template, Interaction } from '@/lib/database.types'
 import { readTextStream, extractJsonFields } from '@/lib/ai/streaming'
 
@@ -178,12 +177,10 @@ export function SendEmailDialog({
     setCc('')
     setBcc('')
     setShowCcBcc(false)
-    supabase
-      .from('templates')
-      .select('*')
-      .eq('type', 'email')
-      .order('name')
-      .then(({ data }) => setTemplates(data ?? []))
+    fetch('/api/templates?type=email')
+      .then((r) => r.json())
+      .then((j) => setTemplates(j?.ok ? j.templates : []))
+      .catch(() => setTemplates([]))
   }, [open])
 
   function applyTemplateById(id: string) {
