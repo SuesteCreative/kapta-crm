@@ -1,16 +1,24 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Sparkles, Loader2, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { Sparkles, Loader2, ChevronDown, ChevronUp, X, Paperclip, Image as ImageIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Template, Interaction } from '@/lib/database.types'
 import { readTextStream, extractJsonFields } from '@/lib/ai/streaming'
+import { uploadAttachment, type UploadedAttachment, MAX_ATTACHMENT_BYTES } from '@/lib/upload-attachment'
+import { compressImage } from '@/lib/compress-image'
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
 
 export interface EmailContact {
   label: string
@@ -167,6 +175,14 @@ export function SendEmailDialog({
   const [refineInput, setRefineInput] = useState('')
   const [refining,    setRefining]    = useState(false)
   const [aiInstruction, setAiInstruction] = useState('')
+  const [inlineImages, setInlineImages]   = useState<UploadedAttachment[]>([])
+  const [attachments, setAttachments]     = useState<UploadedAttachment[]>([])
+  const [uploadingFile, setUploadingFile] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
+
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { setTo(customerEmail) }, [customerEmail])
 
@@ -177,11 +193,89 @@ export function SendEmailDialog({
     setCc('')
     setBcc('')
     setShowCcBcc(false)
+    setInlineImages([])
+    setAttachments([])
     fetch('/api/templates?type=email')
       .then((r) => r.json())
       .then((j) => setTemplates(j?.ok ? j.templates : []))
       .catch(() => setTemplates([]))
   }, [open])
+
+  function insertAtCursor(token: string) {
+    const ta = bodyRef.current
+    if (!ta) {
+      setBody((prev) => prev + token)
+      return
+    }
+    const start = ta.selectionStart ?? body.length
+    const end   = ta.selectionEnd ?? body.length
+    const next = body.slice(0, start) + token + body.slice(end)
+    setBody(next)
+    requestAnimationFrame(() => {
+      if (!bodyRef.current) return
+      bodyRef.current.focus()
+      const pos = start + token.length
+      bodyRef.current.setSelectionRange(pos, pos)
+    })
+  }
+
+  async function uploadAndAttach(file: File) {
+    setUploadingFile(true)
+    try {
+      const att = await uploadAttachment(file)
+      setAttachments((prev) => [...prev, att])
+      toast.success(`Anexo carregado: ${att.name}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro no upload.')
+    } finally {
+      setUploadingFile(false)
+    }
+  }
+
+  async function uploadAndInline(file: File) {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Só imagens são permitidas inline. Usa "Anexar ficheiro" para outros tipos.')
+      return
+    }
+    setUploadingImage(true)
+    try {
+      const compressed = await compressImage(file)
+      const att = await uploadAttachment(compressed)
+      setInlineImages((prev) => [...prev, att])
+      insertAtCursor(`[img:${att.url}]`)
+      toast.success('Imagem inserida no corpo.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro no upload.')
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
+  function handleBodyPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) {
+          e.preventDefault()
+          uploadAndInline(file)
+          return
+        }
+      }
+    }
+  }
+
+  function removeInlineImage(idx: number) {
+    const att = inlineImages[idx]
+    setBody((prev) => prev.replace(`[img:${att.url}]`, ''))
+    setInlineImages((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  function removeAttachment(idx: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx))
+  }
 
   function applyTemplateById(id: string) {
     const tpl = templates.find((t) => t.id === id)
@@ -291,6 +385,7 @@ export function SendEmailDialog({
           ...(bcc ? { bcc } : {}),
           subject,
           body,
+          attachments: attachments.map((a) => ({ name: a.name, url: a.url, mime: a.mime, size: a.size })),
         }),
       })
       const data = await res.json()
@@ -313,6 +408,8 @@ export function SendEmailDialog({
     setBcc('')
     setRefineInput('')
     setAiInstruction('')
+    setInlineImages([])
+    setAttachments([])
     onClose()
   }
 
@@ -455,12 +552,125 @@ export function SendEmailDialog({
           <div className="space-y-1.5">
             <Label className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>Mensagem</Label>
             <Textarea
+              ref={bodyRef}
               rows={10}
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              placeholder={drafting ? 'A gerar…' : 'Escreve a mensagem aqui…'}
+              onPaste={handleBodyPaste}
+              placeholder={drafting ? 'A gerar…' : 'Escreve a mensagem aqui. Cola imagens diretamente para inseri-las no corpo.'}
               disabled={drafting}
               style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)', resize: 'none' }}
+            />
+          </div>
+
+          {/* Inline image thumbnails */}
+          {inlineImages.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>
+                Imagens inline ({inlineImages.length})
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                {inlineImages.map((img, idx) => (
+                  <div
+                    key={img.url}
+                    className="relative rounded-md overflow-hidden"
+                    style={{ width: 64, height: 64, border: '1px solid var(--border)' }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img.url} alt={img.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <button
+                      onClick={() => removeInlineImage(idx)}
+                      className="absolute top-0.5 right-0.5 rounded-full p-0.5"
+                      style={{ background: 'rgba(0,0,0,0.6)' }}
+                      title="Remover imagem"
+                    >
+                      <X className="h-3 w-3" style={{ color: '#fff' }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Attachments */}
+          {attachments.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-[12px]" style={{ color: 'var(--muted-foreground)' }}>
+                Anexos ({attachments.length})
+              </Label>
+              <div className="space-y-1">
+                {attachments.map((att, idx) => (
+                  <div
+                    key={att.url}
+                    className="flex items-center gap-2 rounded-md px-2.5 py-1.5"
+                    style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}
+                  >
+                    <Paperclip className="h-3 w-3 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
+                    <span className="text-[12px] truncate flex-1" style={{ color: 'var(--foreground)' }}>{att.name}</span>
+                    <span className="text-[11px] shrink-0" style={{ color: 'var(--muted-foreground)' }}>
+                      {formatBytes(att.size)}
+                    </span>
+                    <button onClick={() => removeAttachment(idx)} className="opacity-50 hover:opacity-100">
+                      <X className="h-3 w-3" style={{ color: 'var(--muted-foreground)' }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Add attachment / image buttons */}
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingFile}
+              variant="outline"
+              className="h-9 gap-1.5 text-[12px]"
+              style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--foreground)' }}
+            >
+              {uploadingFile
+                ? <><Loader2 className="h-3 w-3 animate-spin" /> A carregar…</>
+                : <><Paperclip className="h-3 w-3" /> Anexar ficheiro</>}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              disabled={uploadingImage}
+              variant="outline"
+              className="h-9 gap-1.5 text-[12px]"
+              style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--foreground)' }}
+            >
+              {uploadingImage
+                ? <><Loader2 className="h-3 w-3 animate-spin" /> A carregar…</>
+                : <><ImageIcon className="h-3 w-3" /> Inserir imagem</>}
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (!file) return
+                if (file.size > MAX_ATTACHMENT_BYTES) {
+                  toast.error(`${file.name} excede 15MB.`)
+                  return
+                }
+                uploadAndAttach(file)
+              }}
+            />
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (!file) return
+                uploadAndInline(file)
+              }}
             />
           </div>
 
