@@ -19,6 +19,12 @@ export const maxDuration = 60
  *
  * Never touches rows already converted to an integration (fh_integration_id set).
  *
+ * The fh_integration_id/fh_integration_request checks used to run in JS after
+ * fetching every matching row's full content+metadata — meaning every click
+ * re-downloaded the entire matched history (growing without bound) just to
+ * throw away the ones already handled. Pushed into the query instead, so
+ * only never-yet-flagged rows are fetched.
+ *
  * POST → { ok, scanned, flagged }
  */
 export async function POST(req: NextRequest) {
@@ -31,6 +37,8 @@ export async function POST(req: NextRequest) {
     .from('interactions')
     .select('id, content, metadata')
     .ilike('content', '%new integration has been submitted via the fareharbor%')
+    .filter('metadata->>fh_integration_id', 'is', null)
+    .filter('metadata->>fh_integration_request', 'is', null)
     .order('occurred_at', { ascending: false })
     .limit(2000)
 
@@ -41,8 +49,6 @@ export async function POST(req: NextRequest) {
 
   for (const r of rows ?? []) {
     const md = (r.metadata ?? {}) as Record<string, unknown>
-    if (md.fh_integration_id) continue          // already converted — leave alone
-    if (md.fh_integration_request === true) continue   // already flagged
 
     const body = (r.content as string | null) ?? ''
     if (!body) continue

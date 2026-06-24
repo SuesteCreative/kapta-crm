@@ -18,7 +18,7 @@ export default async function EmailsPage() {
     `
 
   let { data: rows, error } = await supabase
-    .from('interactions')
+    .from('interactions_email_list')
     .select(fullSelect)
     .eq('type', 'email')
     .order('occurred_at', { ascending: false })
@@ -28,7 +28,7 @@ export default async function EmailsPage() {
   // and treat all rows as read so the list still renders.
   if (error || !rows) {
     const fb = await supabase
-      .from('interactions')
+      .from('interactions_email_list')
       .select(fallbackSelect)
       .eq('type', 'email')
       .order('occurred_at', { ascending: false })

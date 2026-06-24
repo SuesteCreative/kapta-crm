@@ -598,7 +598,7 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
     // 2026-06-11 and took the DB down. 15 min keeps the inbox fresh enough;
     // the manual "Sincronizar" button covers the "I want it now" case.
     const THROTTLE_MS = 15 * 60 * 1000
-    const REFRESH_THROTTLE_MS = 5 * 60 * 1000
+    const REFRESH_THROTTLE_MS = 15 * 60 * 1000
     // The list normally refreshes via <JobToaster /> when a sync job
     // completes, but that depends on the Supabase realtime websocket, which
     // can die silently (laptop sleep, network change). Refresh the server
@@ -617,7 +617,7 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
       syncNowRef.current(true) // silent
     }
     maybeSync()
-    const id = setInterval(maybeSync, 5 * 60 * 1000)
+    const id = setInterval(maybeSync, REFRESH_THROTTLE_MS)
     window.addEventListener('focus', maybeSync)
     document.addEventListener('visibilitychange', maybeSync)
     return () => {
