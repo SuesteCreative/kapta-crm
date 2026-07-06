@@ -9,6 +9,8 @@ export interface CreateFollowUpInput {
   description?: string | null
   due_date?: string | null
   priority?: Priority
+  source_interaction_id?: string | null
+  auto_created?: boolean
 }
 
 export interface CreateTicketInput {
@@ -32,6 +34,8 @@ export async function createFollowUp(input: CreateFollowUpInput): Promise<void> 
     description: input.description ?? null,
     due_date: input.due_date ?? null,
     priority: input.priority ?? 'medium',
+    source_interaction_id: input.source_interaction_id ?? null,
+    auto_created: input.auto_created ?? false,
   })
   if (error) throw error
 }

@@ -402,6 +402,12 @@ export function ComposeEmailDialog({ open, onClose, draftId: initialDraftId = nu
       if (!res.ok || !data.ok) throw new Error(data.error ?? 'Erro')
       await deleteDraftIfAny()
       toast.success('Email enviado!')
+      if (data.followUp?.due_date) {
+        const d = new Date(data.followUp.due_date)
+        toast.success('Follow-up criado', {
+          description: `Lembrete para ${d.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' })} — "${data.followUp.title}"`,
+        })
+      }
       handleClose()
       router.refresh()
     } catch (e) {

@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Mail, MailOpen, ArrowDownLeft, ArrowUpRight, Search, RefreshCw, Loader2, X,
   ExternalLink, Paperclip, Reply, ReplyAll, Forward, PenSquare, FileText, Trash2,
-  Ticket as TicketIcon, CalendarCheck, AlertTriangle, ChevronRight, Plug, Wrench, Code2,
+  Ticket as TicketIcon, CalendarCheck, Plug, Wrench, Code2,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { formatDateTime } from '@/lib/utils'
@@ -46,6 +46,7 @@ const FhIntegrationDialog = dynamic(
   () => import('@/components/fh-integration-dialog').then((m) => ({ default: m.FhIntegrationDialog })),
   { ssr: false },
 )
+import { FollowUpAccordion } from '@/components/follow-up-accordion'
 import type { Recipient } from '@/components/recipient-picker'
 import type { Interaction, CustomerIdentifier, CustomerWithIdentifiers } from '@/lib/database.types'
 import { getPlatform, PLATFORM_STYLES } from '@/lib/platform-detector'
@@ -177,18 +178,6 @@ const FILTER_DEFS: Array<{ key: InboxFilter; label: string }> = [
 const FILTER_STORAGE_KEY = 'kapta:emails:filter'
 const UNREAD_ON_TOP_STORAGE_KEY = 'kapta:emails:unreadOnTop'
 
-interface StaleThread {
-  id: string
-  customer_id: string
-  customer_name: string | null
-  customer_company: string | null
-  subject: string | null
-  occurred_at: string
-  direction: 'inbound' | 'outbound'
-  age_hours: number
-  reason: 'you_owe' | 'waiting_on_customer'
-}
-
 function formatBytes(n?: number): string {
   if (!n) return ''
   if (n < 1024) return `${n} B`
@@ -248,8 +237,6 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
   const [followUpCtx, setFollowUpCtx]   = useState<{ customer_id: string; customer_name: string; subject: string } | null>(null)
   const [fhOpen, setFhOpen]             = useState(false)
   const [fhCtx, setFhCtx]               = useState<{ sourceId: string; prefill: FhIntegrationParsed | null } | null>(null)
-  const [staleThreads, setStaleThreads] = useState<StaleThread[]>([])
-  const [staleDismissed, setStaleDismissed] = useState(false)
   const [selectedId, setSelectedId]     = useState<string | null>(null)
   const [replyOpen, setReplyOpen]       = useState(false)
   const [replyCtx, setReplyCtx]         = useState<ReplyContext | null>(null)
@@ -277,8 +264,6 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
   useEffect(() => {
     const f = localStorage.getItem(FILTER_STORAGE_KEY)
     if (f === 'all' || f === 'needs_reply' || f === 'inbound' || f === 'outbound') setFilter(f)
-    const dismissedDay = localStorage.getItem('kapta:stale:dismissed')
-    if (dismissedDay === new Date().toISOString().slice(0, 10)) setStaleDismissed(true)
     if (localStorage.getItem(UNREAD_ON_TOP_STORAGE_KEY) === '1') setUnreadOnTop(true)
   }, [])
 
@@ -314,19 +299,6 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
     }, 300)
     return () => { cancelled = true; clearTimeout(t) }
   }, [search])
-
-  // Fetch stale threads on mount
-  useEffect(() => {
-    fetch('/api/inbox/stale-threads')
-      .then((r) => r.json())
-      .then((json) => { if (json.ok) setStaleThreads(json.threads ?? []) })
-      .catch(() => { /* silent */ })
-  }, [])
-
-  function dismissStaleBanner() {
-    setStaleDismissed(true)
-    localStorage.setItem('kapta:stale:dismissed', new Date().toISOString().slice(0, 10))
-  }
 
   async function openTicket(email: EmailRow) {
     setTicketLoading(true)
@@ -383,11 +355,6 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
     } finally {
       setFhFlagLoading(false)
     }
-  }
-
-  function selectStaleThread(t: StaleThread) {
-    setSelectedId(t.id)
-    dismissStaleBanner()
   }
 
   useEffect(() => {
@@ -882,60 +849,8 @@ export function EmailsClient({ emails: initialEmails }: { emails: EmailRow[] }) 
         </div>
       </div>
 
-      {/* Stale-thread banner */}
-      {!staleDismissed && staleThreads.length > 0 && (
-        <div
-          className="rounded-xl px-4 py-3"
-          style={{
-            background: 'rgba(245,158,11,0.06)',
-            border: '1px solid rgba(245,158,11,0.25)',
-          }}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 text-[12px] font-medium" style={{ color: 'rgb(180,83,9)' }}>
-              <AlertTriangle className="h-3.5 w-3.5" />
-              {staleThreads.length} {staleThreads.length === 1 ? 'thread parada' : 'threads paradas'}
-            </div>
-            <button
-              onClick={dismissStaleBanner}
-              className="text-[11px] hover:opacity-70"
-              style={{ color: 'var(--muted-foreground)' }}
-            >
-              Dispensar hoje
-            </button>
-          </div>
-          <div className="space-y-1">
-            {staleThreads.slice(0, 5).map((t) => (
-              <button
-                key={t.id}
-                onClick={() => selectStaleThread(t)}
-                className="w-full flex items-center justify-between gap-3 px-2 py-1.5 rounded-md text-left hover:bg-[rgba(245,158,11,0.08)]"
-              >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span
-                    className="rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0"
-                    style={{
-                      background: t.reason === 'you_owe' ? 'rgba(239,68,68,0.12)' : 'rgba(91,91,214,0.12)',
-                      color: t.reason === 'you_owe' ? 'rgb(220,38,38)' : 'var(--primary)',
-                    }}
-                  >
-                    {t.reason === 'you_owe' ? 'Deves resposta' : 'À espera'}
-                  </span>
-                  <span className="text-[12px] truncate" style={{ color: 'var(--foreground)' }}>
-                    {t.customer_name ?? '—'}
-                    {t.customer_company && <span style={{ color: 'var(--muted-foreground)' }}> · {t.customer_company}</span>}
-                    <span style={{ color: 'var(--muted-foreground)' }}> · {t.subject ?? '(sem assunto)'}</span>
-                  </span>
-                </div>
-                <span className="text-[11px] tabular-nums shrink-0" style={{ color: 'var(--muted-foreground)' }}>
-                  {t.age_hours < 24 ? `${Math.floor(t.age_hours)}h` : `${Math.floor(t.age_hours / 24)}d`}
-                </span>
-                <ChevronRight className="h-3 w-3 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Follow-ups due today / overdue — replaces the old stale-thread banner */}
+      <FollowUpAccordion />
 
       {/* Split: list + preview */}
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,520px)_1fr] gap-5 items-start">

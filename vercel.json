@@ -7,6 +7,14 @@
     {
       "path": "/api/keep-alive",
       "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/watchdog",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/follow-up-digest",
+      "schedule": "30 7 * * *"
     }
   ],
   "functions": {

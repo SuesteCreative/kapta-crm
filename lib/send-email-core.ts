@@ -73,6 +73,22 @@ async function fetchAttachment(att: AttachmentInput) {
 
 export interface SendResult {
   messageId: string
+  /** id of the logged outbound interaction row, when customer_id was provided. */
+  interactionId: string | null
+}
+
+/** Shared SMTP transporter — reused by the mailer, digest and calendar-invite senders. */
+export function getTransporter() {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT ?? 465),
+    secure: true,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASSWORD,
+    },
+    tls: { rejectUnauthorized: false },
+  })
 }
 
 /** Send an email via SMTP and log it as an outbound interaction when customer_id is known. */
@@ -105,16 +121,7 @@ ${sigHtml ? `<br><br>${sigHtml}` : ''}
     ? await Promise.all(attachments.map(fetchAttachment))
     : []
 
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT ?? 465),
-    secure: true,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASSWORD,
-    },
-    tls: { rejectUnauthorized: false },
-  })
+  const transporter = getTransporter()
 
   const info = await transporter.sendMail({
     from: process.env.SMTP_USER,
@@ -127,8 +134,9 @@ ${sigHtml ? `<br><br>${sigHtml}` : ''}
     ...(mailerAttachments.length > 0 ? { attachments: mailerAttachments } : {}),
   })
 
+  let interactionId: string | null = null
   if (customer_id) {
-    const { error: insertError } = await supabase.from('interactions').insert({
+    const { data: inserted, error: insertError } = await supabase.from('interactions').insert({
       customer_id,
       type: 'email',
       direction: 'outbound',
@@ -142,9 +150,10 @@ ${sigHtml ? `<br><br>${sigHtml}` : ''}
         attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, size: a.size, url: a.url })),
       },
       occurred_at: new Date().toISOString(),
-    })
+    }).select('id').single()
     if (insertError) console.error('Failed to log sent email interaction:', insertError.message)
+    else interactionId = inserted?.id ?? null
   }
 
-  return { messageId: info.messageId }
+  return { messageId: info.messageId, interactionId }
 }
