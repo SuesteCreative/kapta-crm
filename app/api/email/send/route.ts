@@ -83,8 +83,25 @@ async function maybeCreateFollowUp(
       return null
     }
 
+    // Fetch client details so the calendar reminder says who to contact.
+    const { data: cust } = await supabase
+      .from('customers')
+      .select('name, company, customer_identifiers ( type, value, is_primary )')
+      .eq('id', customerId)
+      .single()
+    const idents = (cust?.customer_identifiers ?? []) as Array<{ type: string; value: string; is_primary: boolean }>
+    const emails = idents.filter((i) => i.type === 'email')
+    const primaryEmail = emails.find((e) => e.is_primary)?.value ?? emails[0]?.value ?? null
+
     // "Os dois": also drop a calendar invite in Pedro's Google Calendar.
-    await sendCalendarInvite({ title, description: title, dueDateISO: dueDate, followUpId: created.id })
+    await sendCalendarInvite({
+      title,
+      dueDateISO: dueDate,
+      followUpId: created.id,
+      customerName: cust?.name ?? null,
+      customerCompany: cust?.company ?? null,
+      customerEmail: primaryEmail,
+    })
 
     return { id: created.id, title: created.title, due_date: created.due_date }
   } catch (err) {

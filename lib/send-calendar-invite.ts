@@ -45,11 +45,14 @@ function floatingAt(dateISO: string, hour: number): string {
 
 export interface CalendarInviteInput {
   title: string
-  description?: string
   /** YYYY-MM-DD */
   dueDateISO: string
   /** Follow-up id — used as the stable event UID so re-sends update the event. */
   followUpId?: string
+  /** Client details, so the reminder actually says who to contact. */
+  customerName?: string | null
+  customerEmail?: string | null
+  customerCompany?: string | null
 }
 
 export async function sendCalendarInvite(input: CalendarInviteInput): Promise<void> {
@@ -59,11 +62,20 @@ export async function sendCalendarInvite(input: CalendarInviteInput): Promise<vo
     return
   }
 
+  const who = input.customerName?.trim() || 'cliente'
+  const detailLines = [
+    `Cliente: ${input.customerName ?? '—'}`,
+    input.customerCompany ? `Empresa: ${input.customerCompany}` : null,
+    input.customerEmail ? `Email: ${input.customerEmail}` : null,
+    `Assunto: ${input.title}`,
+  ].filter((l): l is string => Boolean(l))
+  const detailText = detailLines.join('\n')
+
   const uid = `${input.followUpId ?? randomUUID()}@kapta.pt`
   const start = floatingAt(input.dueDateISO, 9)      // 09:00 local
   const end = floatingAt(input.dueDateISO, 9).replace('T090000', 'T093000')
-  const summary = ics(`Contactar cliente: ${input.title}`)
-  const description = ics(input.description ?? 'Lembrete de follow-up criado pelo Kapta CRM.')
+  const summary = ics(`Contactar ${who}: ${input.title}`)
+  const description = ics(`${detailText}\n\nLembrete criado pelo Kapta CRM.`)
 
   const content = [
     'BEGIN:VCALENDAR',
@@ -94,8 +106,8 @@ export async function sendCalendarInvite(input: CalendarInviteInput): Promise<vo
     await getTransporter().sendMail({
       from: process.env.SMTP_USER,
       to,
-      subject: `📅 Follow-up: ${input.title}`,
-      text: `Lembrete de follow-up agendado para ${input.dueDateISO}.\n\n${input.description ?? ''}`,
+      subject: `📅 Follow-up: ${who} — ${input.title}`,
+      text: `Lembrete de follow-up para ${input.dueDateISO}:\n\n${detailText}`,
       icalEvent: { method: 'REQUEST', filename: 'follow-up.ics', content },
     })
   } catch (err) {
