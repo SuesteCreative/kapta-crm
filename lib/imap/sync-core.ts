@@ -573,9 +573,13 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
         }
         if (allUids.length === 0) continue
 
+        // Ascending (oldest first), NOT newest first. The cursor can only be
+        // checkpointed across a contiguous prefix of examined UIDs, so the run
+        // has to consume the range from the bottom up. Newest-first meant a
+        // partial run could never checkpoint anything: see advanceCursor below.
         const candidateUids: number[] = []
         const uidToMessageId = new Map<number, string>()
-        for await (const msg of client.fetch([...allUids].reverse().slice(0, 2000), {
+        for await (const msg of client.fetch([...allUids].sort((a, b) => a - b).slice(0, 2000), {
           uid: true, envelope: true,
         }, { uid: true })) {
           const messageId = msg.envelope?.messageId
@@ -1061,12 +1065,30 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
           }
         }
 
-        // Box fully drained this run (no chunk cap hit) — advance the cursor
-        // past everything we saw. Skipped here when hasMore: the continuation
-        // run re-lists the remainder and dedups, then advances.
-        if (!hasMore) {
-          await advanceCursor(path, boxValidity, maxSeenUid)
-        }
+        // Checkpoint. Two cases:
+        //
+        //   drained (!hasMore) — nothing left below maxSeenUid, advance past
+        //   the whole listing.
+        //
+        //   partial (hasMore) — advance to the highest UID this run examined.
+        //   Because the listing is ascending and chunkUids is its prefix,
+        //   every UID at or below chunkMaxUid has now been stored, recognised
+        //   as already-stored, or deliberately rejected. All three are
+        //   decisions, and a decision has to be durable.
+        //
+        // This used to skip the partial case entirely, on the theory that the
+        // continuation would re-list and dedup. It does — but a message the
+        // sync deliberately declines to store (notification, unknown sender,
+        // no Message-ID) never lands in `interactions`, so it is never
+        // "already-stored" on the next pass. It comes back as a candidate
+        // forever, candidateUids never empties, hasMore is never false, and
+        // the cursor is pinned. That is how INBOX froze at UID 8579 on
+        // 2026-07-15 with 559 real messages stranded above it while the job
+        // counters happily climbed.
+        const chunkMaxUid = chunkUids.length > 0
+          ? chunkUids.reduce((m, u) => (u > m ? u : m), 0)
+          : 0
+        await advanceCursor(path, boxValidity, hasMore ? chunkMaxUid : maxSeenUid)
       } finally {
         lock.release()
       }
