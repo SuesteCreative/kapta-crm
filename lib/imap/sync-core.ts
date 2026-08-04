@@ -139,6 +139,59 @@ export type SyncOptions = {
   maxEmails?: number
 }
 
+// The dedup preload has to cover every message the IMAP listing can hand back,
+// or the sync cannot recognise mail it already stored. Those messages stay
+// "candidates" forever: the UID cursor never advances (it only advances when
+// candidates hit zero), every run burns its whole chunk budget re-parsing the
+// same backlog, and `hasMore` stays true so the Sent box is never reached.
+//
+// That is exactly what happened 2026-08-04. The window was derived from the
+// newest email of ANY kind, so each mail Pedro sent from the CRM dragged the
+// window forward to "yesterday" and the preload returned 7 rows instead of
+// ~2500. Inbound sync froze at 2026-07-19 and the cursor at 2026-07-15.
+//
+// So: anchor the window well behind anything the cursor can still re-list,
+// never on the live watermark.
+const DEDUP_LOOKBACK_DAYS = 120
+
+/**
+ * All known source_ids (RFC Message-IDs) recent enough to collide with what
+ * IMAP may re-list. Paged explicitly: PostgREST caps a plain .select() at 1000
+ * rows, and a silent truncation here is indistinguishable from "never seen it"
+ * — which is what re-opens the loop above. Errors throw rather than yielding a
+ * short set, for the same reason.
+ */
+async function loadKnownSourceIds(
+  supabase: ReturnType<typeof createServiceClient>,
+  syncSince: Date,
+): Promise<Set<string>> {
+  const dedupSince = new Date(Math.min(
+    syncSince.getTime() - 2 * 24 * 60 * 60 * 1000,
+    Date.now() - DEDUP_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+  ))
+
+  const ids = new Set<string>()
+  const PAGE = 1000
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('interactions')
+      .select('source_id')
+      .not('source_id', 'is', null)
+      .gte('occurred_at', dedupSince.toISOString())
+      .order('occurred_at', { ascending: false })
+      .range(from, from + PAGE - 1)
+
+    if (error) {
+      throw new Error(`dedup preload failed (would re-sync the whole backlog): ${error.message}`)
+    }
+    for (const row of data ?? []) {
+      if (row.source_id) ids.add(row.source_id)
+    }
+    if (!data || data.length < PAGE) break
+  }
+  return ids
+}
+
 /**
  * Cheap envelope-only count of how many candidate emails a full sync would
  * need to process. Called once at the start of an Inngest chain so the UI
@@ -171,17 +224,7 @@ export async function countPendingCandidates(): Promise<{
     syncSince = new Date(Date.now() - 24 * 60 * 60 * 1000)
   }
 
-  const dedupSince = new Date(syncSince.getTime() - 2 * 24 * 60 * 60 * 1000)
-  const { data: existingRows } = await supabase
-    .from('interactions')
-    .select('source_id')
-    .not('source_id', 'is', null)
-    .gte('occurred_at', dedupSince.toISOString())
-
-  const existingSourceIds = new Set<string>()
-  for (const row of existingRows ?? []) {
-    if (row.source_id) existingSourceIds.add(row.source_id)
-  }
+  const existingSourceIds = await loadKnownSourceIds(supabase, syncSince)
 
   const client = new ImapFlow({
     host: process.env.IMAP_HOST!,
@@ -385,17 +428,7 @@ export async function runImapSync(options: SyncOptions = {}): Promise<SyncResult
     syncSince = new Date(Date.now() - 24 * 60 * 60 * 1000)
   }
 
-  const dedupSince = new Date(syncSince.getTime() - 2 * 24 * 60 * 60 * 1000)
-  const { data: existingRows } = await supabase
-    .from('interactions')
-    .select('source_id')
-    .not('source_id', 'is', null)
-    .gte('occurred_at', dedupSince.toISOString())
-
-  const existingSourceIds = new Set<string>()
-  for (const row of existingRows ?? []) {
-    if (row.source_id) existingSourceIds.add(row.source_id)
-  }
+  const existingSourceIds = await loadKnownSourceIds(supabase, syncSince)
 
   const client = new ImapFlow({
     host: process.env.IMAP_HOST!,
