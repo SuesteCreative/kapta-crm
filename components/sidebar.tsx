@@ -29,21 +29,33 @@ export function Sidebar() {
   const [pasteOpen, setPasteOpen] = useState(false)
   const [fhPending, setFhPending] = useState<number>(0)
 
-  // Pending FH count badge — fetch on mount + every 60s.
+  // Pending FH count badge — fetch on mount + every 30 min, visible tabs only.
   // Previously refetched on every navigation, which hit a heavy endpoint
   // (pulls 1.5k interactions + external FH API) on every link click.
+  // Then it polled every 60s from every open tab, which drained the Supabase
+  // disk IO budget: the query seq-scanned all of `interactions` (~4s, 216MB
+  // read) until idx_interactions_fh_request landed. Index + this interval keep
+  // it cheap; a badge counter does not need 60-second freshness, and each call
+  // also hits the external FareHarbor admin API.
   useEffect(() => {
     if (pathname === '/login') return
     let cancelled = false
     const load = () => {
+      if (document.hidden) return
       fetch('/api/fareharbor/pending-count')
         .then((r) => r.ok ? r.json() : { count: 0 })
         .then((d) => { if (!cancelled) setFhPending(d.count ?? 0) })
         .catch(() => { /* silent */ })
     }
     load()
-    const t = setInterval(load, 60_000)
-    return () => { cancelled = true; clearInterval(t) }
+    const t = setInterval(load, 1_800_000)
+    // Refresh on tab focus so the badge is never stale when actually looked at.
+    document.addEventListener('visibilitychange', load)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', load)
+    }
   // Mount-only — pathname dep removed deliberately.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
